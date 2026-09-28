@@ -22,7 +22,7 @@ python -m pip install Flask opencv-python-headless
 ## Démarrer l'application
 
 ```bash
-python app.py
+python tst_RTSP_flux.py
 ```
 
 Le serveur écoute sur `0.0.0.0:8090`. Ouvrez <http://localhost:8090> sur la machine qui l'exécute, ou `http://<adresse-ip-du-serveur>:8090` depuis un appareil du même réseau. Le serveur Flask intégré est destiné à un usage local/de confiance, pas à une exposition directe sur Internet.
