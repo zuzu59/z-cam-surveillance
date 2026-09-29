@@ -19,7 +19,7 @@
 
   <main class="workspace">
     <div class="page-heading">
-      <div><p class="eyebrow">RTSP / ANALYSE EN DIRECT</p><h1>Caméra de surveillance</h1><p class="lede">Aperçu échantillonné et réglages temporaires de l’analyse.</p></div>
+      <div><p class="eyebrow">RTSP / ANALYSE EN DIRECT</p><h1>Caméra de surveillance</h1><p class="lede">Détection basse résolution, enregistrement haute résolution et configuration persistante.</p></div>
       <div class="connection-pill" id="connection-pill"><span class="status-dot"></span><span id="connection-text">Connexion en cours</span></div>
     </div>
 
@@ -48,13 +48,19 @@
       </div>
 
       <aside class="settings-panel" aria-labelledby="settings-title">
-        <div class="panel-heading settings-heading"><div><h2 id="settings-title">Réglages</h2><p>Modifiables sans redémarrer le moteur.</p></div><span class="settings-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h9m4 0h3M4 17h3m4 0h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg></span></div>
+        <div class="panel-heading settings-heading"><div><h2 id="settings-title">Réglages</h2><p>Sauvegardés localement sans redémarrer.</p></div><span class="settings-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h9m4 0h3M4 17h3m4 0h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg></span></div>
         <form id="settings-form" autocomplete="off">
           <div class="field-group source-group">
-            <label for="stream-url">Source RTSP</label>
-            <div class="source-state"><span class="status-dot" id="source-dot"></span><span id="source-state-text">Chargement…</span></div>
-            <input id="stream-url" name="url" type="password" inputmode="url" spellcheck="false" autocomplete="new-password" placeholder="rtsp://hôte:port/chemin" aria-describedby="source-help">
-            <p class="field-hint" id="source-help">Laissez vide pour conserver la source. L’URL reste en mémoire et n’est jamais affichée ni enregistrée.</p>
+            <label for="low-stream-url">Flux basse résolution · détection</label>
+            <div class="source-state"><span class="status-dot" id="low-source-dot"></span><span id="low-source-state-text">Chargement…</span></div>
+            <input id="low-stream-url" name="low_resolution_url" type="password" inputmode="url" spellcheck="false" autocomplete="new-password" placeholder="rtsp://hôte:port/flux basse résolution" aria-describedby="source-help">
+            <p class="field-hint" id="source-help">Le flux basse résolution alimente l’analyse. Saisissez une nouvelle URL pour la remplacer; elle reste masquée et n’est jamais renvoyée par l’API.</p>
+          </div>
+          <div class="field-group source-group">
+            <label for="high-stream-url">Flux haute résolution · enregistrement</label>
+            <div class="source-state"><span class="status-dot" id="high-source-dot"></span><span id="high-source-state-text">Chargement…</span></div>
+            <input id="high-stream-url" name="high_resolution_url" type="password" inputmode="url" spellcheck="false" autocomplete="new-password" placeholder="rtsp://hôte:port/flux haute résolution" aria-describedby="high-source-help">
+            <p class="field-hint" id="high-source-help">Ce flux n’est ouvert que pendant les événements enregistrés. Laissez vide pour le conserver.</p>
           </div>
 
           <div class="field-group">
@@ -83,7 +89,7 @@
         <div class="engine-stats"><div><span>Flux</span><strong id="stat-resolution">—</strong></div><div><span>Images reçues</span><strong id="stat-fps">—</strong></div><div><span>Enregistrement</span><strong id="stat-recording">ARRÊTÉ</strong></div></div>
       </aside>
     </section>
-    <footer class="page-footer"><span>Fieldwatch · traitement sur ce serveur</span><span>Les réglages du mode test ne sont pas persistés.</span></footer>
+    <footer class="page-footer"><span>Fieldwatch · traitement sur ce serveur</span><span>Configuration locale protégée · identifiants stockés en clair dans le JSON.</span></footer>
   </main>
 </body>
 </html>

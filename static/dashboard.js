@@ -1,7 +1,8 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const form = $("settings-form");
-  const urlInput = $("stream-url");
+  const lowUrlInput = $("low-stream-url");
+  const highUrlInput = $("high-stream-url");
   const threshold = $("threshold");
   const interval = $("interval");
   const cooldown = $("cooldown");
@@ -23,8 +24,10 @@
     pill.classList.toggle("connected", connected);
     pill.classList.toggle("error", !connected && !configured);
     $("connection-text").textContent = connected ? "Flux connecté" : configured ? "Connexion au flux…" : "Source non configurée";
-    $("source-state-text").textContent = configured ? "Source configurée en mémoire" : "Aucune source configurée";
-    $("source-dot").classList.toggle("inactive", !configured);
+  };
+  const setSourceState = (prefix, configured) => {
+    $(`${prefix}-source-state-text`).textContent = configured ? "URL mémorisée localement" : "URL non configurée";
+    $(`${prefix}-source-dot`).classList.toggle("inactive", !configured);
   };
   const renderDetections = (detections) => {
     const list = $("detection-list");
@@ -100,16 +103,18 @@
     event.preventDefault();
     const button = form.querySelector("button[type=submit]");
     const feedback = $("form-feedback");
-    const url = urlInput.value.trim();
+    const lowUrl = lowUrlInput.value.trim();
+    const highUrl = highUrlInput.value.trim();
     const payload = {
       threshold: Number(threshold.value),
       interval: Number(interval.value),
       no_detection_seconds: Number(cooldown.value),
       recording_enabled: recordingEnabled.checked,
     };
-    if (url) payload.url = url;
-    urlInput.value = "";
-    feedback.textContent = "Application des réglages…";
+    if (lowUrl) payload.low_resolution_url = lowUrl;
+    if (highUrl) payload.high_resolution_url = highUrl;
+    const sourceUpdated = Boolean(lowUrl || highUrl);
+    feedback.textContent = "Application et sauvegarde des réglages…";
     feedback.className = "form-feedback";
     button.disabled = true;
     try {
@@ -122,7 +127,11 @@
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Réglages refusés.");
       hydrateSettings(result.settings);
-      feedback.textContent = url ? "Source mise à jour en mémoire. Reconnexion en cours…" : "Réglages appliqués en mémoire.";
+      lowUrlInput.value = "";
+      highUrlInput.value = "";
+      feedback.textContent = sourceUpdated
+        ? "Flux mis à jour et sauvegardés. Reconnexion en cours…"
+        : "Réglages sauvegardés dans le fichier local.";
       feedback.classList.add("success");
       await refreshState();
     } catch (error) {
@@ -139,7 +148,9 @@
       if (!response.ok) throw new Error("État indisponible");
       const state = await response.json();
       const settings = state.settings;
-      setConnection(state.connected, settings.stream_configured);
+      setConnection(state.connected, settings.low_stream_configured);
+      setSourceState("low", settings.low_stream_configured);
+      setSourceState("high", settings.high_stream_configured);
       if (settings && newestSequence < 0) hydrateSettings(settings);
       if (state.preview_sequence !== newestSequence) {
         newestSequence = state.preview_sequence;

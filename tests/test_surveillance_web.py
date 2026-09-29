@@ -1,12 +1,17 @@
+import json
+import stat
 import threading
 import time
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
 from types import SimpleNamespace
 
 import numpy as np
 
 from surveillance import Detection, Surveillance, label_for_class, load_labels
+from surveillance_config import DEFAULT_CONFIG
 from surveillance_web import create_app
 
 
@@ -56,19 +61,110 @@ class SurveillanceDashboardTests(unittest.TestCase):
         self.assertEqual(self.engine.threshold, 0.5)
         self.assertEqual(self.engine.interval, 0.5)
 
-    def test_new_stream_is_held_in_memory_and_never_returned(self):
-        response = self.client.post("/api/config", json={
-            "url": "rtsp://192.0.2.20/camera/main",
-        })
-        self.assertEqual(response.status_code, 200)
-        body = self.client.get("/api/state").get_data(as_text=True)
-        self.assertNotIn("192.0.2.20", body)
-        self.assertTrue(self.engine.settings_snapshot()["stream_configured"])
+    def test_both_streams_and_settings_persist_without_exposing_urls(self):
+        with TemporaryDirectory() as directory:
+            config_path = Path(directory) / "surveillance.json"
+            config = DEFAULT_CONFIG.copy()
+            engine = Surveillance("", SimpleNamespace(threshold=0.5), 0.5, 0.5, 10,
+                                  Path("captures"), config_path=config_path, config_data=config)
+            client = create_app(engine).test_client()
+            low_url = "rtsp://user:secret@192.0.2.20/low"
+            high_url = "rtsp://user:secret@192.0.2.20/high"
+            response = client.post("/api/config", json={
+                "low_resolution_url": low_url,
+                "high_resolution_url": high_url,
+                "threshold": 0.66,
+                "interval": 0.8,
+                "no_detection_seconds": 12,
+                "recording_enabled": True,
+            })
+            self.assertEqual(response.status_code, 200)
+            body = client.get("/api/state").get_data(as_text=True)
+            self.assertNotIn("192.0.2.20", body)
+            self.assertNotIn("secret", body)
+            saved = json.loads(config_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["low_resolution_url"], low_url)
+            self.assertEqual(saved["high_resolution_url"], high_url)
+            self.assertEqual(saved["interval"], 0.8)
+            self.assertEqual(stat.S_IMODE(config_path.stat().st_mode), 0o600)
+            self.assertTrue(engine.settings_snapshot()["low_stream_configured"])
+            self.assertTrue(engine.settings_snapshot()["high_stream_configured"])
 
     def test_rejects_non_rtsp_source(self):
         response = self.client.post("/api/config", json={"url": "https://example.invalid/camera"})
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(self.engine.url, "rtsp://192.0.2.15/substream")
+        self.assertEqual(self.engine.low_resolution_url, "rtsp://192.0.2.15/substream")
+
+    def test_missing_high_resolution_source_does_not_create_empty_clip(self):
+        with TemporaryDirectory() as output:
+            engine = Surveillance("rtsp://192.0.2.1/low", SimpleNamespace(threshold=0.5),
+                                  0.5, 0.5, 1.0, Path(output))
+            engine.record_requested = True
+            worker = threading.Thread(target=engine.recording_loop, daemon=True)
+            with patch("surveillance.cv2.VideoCapture") as capture_factory, \
+                    patch("surveillance.cv2.VideoWriter") as writer_factory:
+                worker.start()
+                time.sleep(0.05)
+                engine.stop_event.set()
+                worker.join(timeout=1)
+            capture_factory.assert_not_called()
+            writer_factory.assert_not_called()
+            self.assertEqual(list(Path(output).iterdir()), [])
+
+    def test_recording_uses_high_resolution_stream(self):
+        with TemporaryDirectory() as output:
+            engine = Surveillance("rtsp://camera/low", SimpleNamespace(threshold=0.5),
+                                  0.5, 0.5, 10, Path(output), high_resolution_url="rtsp://camera/high")
+            engine.record_requested = True
+            engine.last_detection = time.monotonic()
+            frames = []
+
+            class HighResolutionCapture:
+                def __init__(self, url, *_args):
+                    self.url = url
+                    self.read_count = 0
+                    capture_urls.append(url)
+
+                def isOpened(self):
+                    return True
+
+                def read(self):
+                    self.read_count += 1
+                    frames.append(np.zeros((720, 1280, 3), dtype=np.uint8))
+                    if self.read_count == 3:
+                        engine.stop_event.set()
+                    return True, frames[-1]
+
+                def get(self, _property):
+                    return 15.0
+
+                def release(self):
+                    pass
+
+            class Writer:
+                def __init__(self):
+                    self.written = 0
+                    self.released = False
+
+                def isOpened(self):
+                    return True
+
+                def write(self, _frame):
+                    self.written += 1
+
+                def release(self):
+                    self.released = True
+
+            capture_urls = []
+            writer = Writer()
+            with patch("surveillance.cv2.VideoCapture", side_effect=HighResolutionCapture), \
+                    patch("surveillance.cv2.VideoWriter", return_value=writer) as writer_factory:
+                engine.recording_loop()
+            self.assertEqual(capture_urls, ["rtsp://camera/high"])
+            self.assertEqual(writer_factory.call_args.args[3], (1280, 720))
+            self.assertEqual(writer.written, 3)
+            self.assertTrue(writer.released)
+            self.assertFalse(engine.recording_active)
 
     def test_test_mode_encodes_preview_and_detection_state(self):
         detector = SimpleNamespace(
@@ -89,7 +185,7 @@ class SurveillanceDashboardTests(unittest.TestCase):
             self.assertTrue(jpeg.startswith(b"\xff\xd8"))
             state = engine.status_snapshot()
             self.assertEqual(state["detections"][0]["label"], "person")
-            self.assertTrue(state["recording"])
+            self.assertTrue(state["recording_requested"])
         finally:
             engine.stop_event.set()
             worker.join(timeout=1)

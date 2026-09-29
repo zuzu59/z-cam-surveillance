@@ -1,0 +1,14 @@
+{
+  "low_resolution_url": "",
+  "high_resolution_url": "",
+  "threshold": 0.5,
+  "interval": 0.5,
+  "no_detection_seconds": 10.0,
+  "recording_enabled": true,
+  "output_dir": "captures",
+  "model": "models/ssd_mobilenet_v2_coco_quant_postprocess.tflite",
+  "labels": "models/coco_labels.txt",
+  "host": "0.0.0.0",
+  "port": 8091,
+  "mode": "test"
+}

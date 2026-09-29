@@ -4,17 +4,23 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 import cv2
 import numpy as np
+
+from surveillance_config import (
+    DEFAULT_CONFIG,
+    load_config,
+    save_config,
+    validate_config,
+    validate_rtsp_url,
+)
 
 try:
     from ai_edge_litert.interpreter import Interpreter
@@ -118,12 +124,15 @@ class TFLiteDetector:
 
 
 class Surveillance:
-    """Shared camera/inference/recording engine for test and production modes."""
+    """Shared low-resolution inference and high-resolution recording engine."""
 
-    def __init__(self, url: str, detector: TFLiteDetector, threshold: float,
+    def __init__(self, low_resolution_url: str, detector: TFLiteDetector, threshold: float,
                  interval: float, no_detection_seconds: float, output_dir: Path,
-                 recording_enabled: bool = True, preview_enabled: bool = False):
-        self.url = url
+                 recording_enabled: bool = True, preview_enabled: bool = False,
+                 high_resolution_url: str = "", config_path: Path | None = None,
+                 config_data: dict[str, Any] | None = None):
+        self.low_resolution_url = low_resolution_url
+        self.high_resolution_url = high_resolution_url
         self.detector = detector
         self.threshold = threshold
         self.interval = interval
@@ -131,14 +140,19 @@ class Surveillance:
         self.output_dir = output_dir
         self.recording_enabled = recording_enabled
         self.preview_enabled = preview_enabled
+        self.config_path = config_path
+        self.config = DEFAULT_CONFIG.copy() if config_data is None else config_data.copy()
         self.stop_event = threading.Event()
         self.reconnect_event = threading.Event()
+        self.recording_reconnect_event = threading.Event()
+        self.recording_wakeup_event = threading.Event()
         self.lock = threading.Lock()
         self.latest_frame: np.ndarray | None = None
         self.latest_detections: list[Detection] = []
         self.latest_jpeg: bytes | None = None
         self.preview_sequence = 0
         self.connected = False
+        self.recording_active = False
         self.capture_fps = 0.0
         self.last_inference = 0.0
         self.last_detection = 0.0
@@ -146,54 +160,79 @@ class Surveillance:
         self.started = False
         self.capture_thread: threading.Thread | None = None
         self.inference_thread: threading.Thread | None = None
+        self.recording_thread: threading.Thread | None = None
 
     def update_settings(self, payload: dict[str, Any]) -> None:
-        """Validate and atomically update non-secret runtime settings and optional URL."""
-        threshold = float(payload.get("threshold", self.threshold))
-        interval = float(payload.get("interval", self.interval))
-        no_detection_seconds = float(payload.get("no_detection_seconds", self.no_detection_seconds))
-        recording_enabled = payload.get("recording_enabled", self.recording_enabled)
-        if not 0.05 <= threshold <= 0.99:
-            raise ValueError("Le seuil doit être compris entre 0,05 et 0,99.")
-        if not 0.2 <= interval <= 30:
-            raise ValueError("La cadence doit être comprise entre 0,2 et 30 secondes.")
-        if not 0 <= no_detection_seconds <= 3600:
-            raise ValueError("Le délai doit être compris entre 0 et 3600 secondes.")
-        if not isinstance(recording_enabled, bool):
-            raise ValueError("Le réglage d'enregistrement doit être un booléen.")
-        new_url = payload.get("url")
-        if new_url is not None:
-            if not isinstance(new_url, str) or len(new_url) > 2048:
-                raise ValueError("URL RTSP invalide.")
-            new_url = new_url.strip()
-            if new_url:
-                parsed = urlsplit(new_url)
-                if parsed.scheme.lower() not in {"rtsp", "rtsps"} or not parsed.hostname:
-                    raise ValueError("Saisissez une URL rtsp:// ou rtsps:// valide.")
+        """Validate, persist, then apply settings without returning secret URLs."""
         with self.lock:
+            candidate = self.config.copy()
+            threshold = float(payload.get("threshold", self.threshold))
+            interval = float(payload.get("interval", self.interval))
+            no_detection_seconds = float(payload.get("no_detection_seconds", self.no_detection_seconds))
+            recording_enabled = payload.get("recording_enabled", self.recording_enabled)
+            if not 0.05 <= threshold <= 0.99:
+                raise ValueError("Le seuil doit être compris entre 0,05 et 0,99.")
+            if not 0.2 <= interval <= 30:
+                raise ValueError("La cadence doit être comprise entre 0,2 et 30 secondes.")
+            if not 0 <= no_detection_seconds <= 3600:
+                raise ValueError("Le délai doit être compris entre 0 et 3600 secondes.")
+            if not isinstance(recording_enabled, bool):
+                raise ValueError("Le réglage d'enregistrement doit être un booléen.")
+            low_field = "low_resolution_url" if "low_resolution_url" in payload else "url"
+            low_url = self.low_resolution_url
+            if low_field in payload:
+                low_url = validate_rtsp_url(payload[low_field], "Le flux basse résolution")
+            high_url = self.high_resolution_url
+            if "high_resolution_url" in payload:
+                high_url = validate_rtsp_url(payload["high_resolution_url"], "Le flux haute résolution")
+            candidate.update({
+                "low_resolution_url": low_url,
+                "high_resolution_url": high_url,
+                "threshold": threshold,
+                "interval": interval,
+                "no_detection_seconds": no_detection_seconds,
+                "recording_enabled": recording_enabled,
+            })
+            if self.config_path is not None:
+                try:
+                    save_config(self.config_path, candidate)
+                except OSError as exc:
+                    raise ValueError("Impossible d'enregistrer la configuration locale.") from exc
+            low_changed = low_url != self.low_resolution_url
+            high_changed = high_url != self.high_resolution_url
+            self.config = candidate
+            self.low_resolution_url = low_url
+            self.high_resolution_url = high_url
             self.threshold = threshold
             self.interval = interval
             self.no_detection_seconds = no_detection_seconds
             self.recording_enabled = recording_enabled
+            self.output_dir = Path(candidate["output_dir"])
             self.detector.threshold = threshold
-            if new_url:
-                if new_url != self.url:
-                    self.url = new_url
-                    self.latest_frame = None
-                    self.latest_detections = []
-                    self.latest_jpeg = None
-                    self.reconnect_event.set()
+            if low_changed:
+                self.latest_frame = None
+                self.latest_detections = []
+                self.latest_jpeg = None
+                self.reconnect_event.set()
+            if high_changed:
+                self.recording_reconnect_event.set()
+                self.recording_wakeup_event.set()
             if not recording_enabled:
                 self.record_requested = False
+                self.recording_wakeup_event.set()
 
     def settings_snapshot(self) -> dict[str, Any]:
         with self.lock:
+            low_configured = bool(self.low_resolution_url)
+            high_configured = bool(self.high_resolution_url)
             return {
                 "threshold": self.threshold,
                 "interval": self.interval,
                 "no_detection_seconds": self.no_detection_seconds,
                 "recording_enabled": self.recording_enabled,
-                "stream_configured": bool(self.url),
+                "low_stream_configured": low_configured,
+                "high_stream_configured": high_configured,
+                "stream_configured": low_configured,
             }
 
     def status_snapshot(self) -> dict[str, Any]:
@@ -202,7 +241,8 @@ class Surveillance:
             detections = self.latest_detections
             return {
                 "connected": self.connected,
-                "recording": self.record_requested,
+                "recording": self.recording_active,
+                "recording_requested": self.record_requested,
                 "recording_enabled": self.recording_enabled,
                 "width": int(frame.shape[1]) if frame is not None else None,
                 "height": int(frame.shape[0]) if frame is not None else None,
@@ -212,14 +252,19 @@ class Surveillance:
                     for d in detections
                 ],
                 "preview_sequence": self.preview_sequence,
-                "settings": {
-                    "threshold": self.threshold,
-                    "interval": self.interval,
-                    "no_detection_seconds": self.no_detection_seconds,
-                    "recording_enabled": self.recording_enabled,
-                    "stream_configured": bool(self.url),
-                },
+                "settings": self.settings_snapshot_unlocked(),
             }
+
+    def settings_snapshot_unlocked(self) -> dict[str, Any]:
+        return {
+            "threshold": self.threshold,
+            "interval": self.interval,
+            "no_detection_seconds": self.no_detection_seconds,
+            "recording_enabled": self.recording_enabled,
+            "low_stream_configured": bool(self.low_resolution_url),
+            "high_stream_configured": bool(self.high_resolution_url),
+            "stream_configured": bool(self.low_resolution_url),
+        }
 
     def preview_snapshot(self) -> tuple[int, bytes | None]:
         with self.lock:
@@ -229,24 +274,25 @@ class Surveillance:
         if self.started:
             return
         self.started = True
-        self.capture_thread = threading.Thread(target=self.capture_loop, name="rtsp-capture", daemon=True)
+        self.capture_thread = threading.Thread(target=self.capture_loop, name="rtsp-low-capture", daemon=True)
         self.inference_thread = threading.Thread(target=self.inference_loop, name="tflite-inference", daemon=True)
+        self.recording_thread = threading.Thread(target=self.recording_loop, name="rtsp-high-recording", daemon=True)
         self.capture_thread.start()
         self.inference_thread.start()
+        self.recording_thread.start()
 
     def stop(self) -> None:
         self.stop_event.set()
         self.reconnect_event.set()
-        if self.capture_thread:
-            self.capture_thread.join(timeout=7)
-        if self.inference_thread:
-            self.inference_thread.join(timeout=7)
+        self.recording_reconnect_event.set()
+        self.recording_wakeup_event.set()
+        for worker in (self.capture_thread, self.inference_thread, self.recording_thread):
+            if worker:
+                worker.join(timeout=7)
         self.started = False
 
     def capture_loop(self) -> None:
         capture: Any = None
-        writer: Any = None
-        last_size: tuple[int, int] | None = None
         reconnect_delay = 1.0
         previous_frame_at = 0.0
         try:
@@ -256,20 +302,17 @@ class Surveillance:
                     if capture is not None:
                         capture.release()
                         capture = None
-                    if writer is not None:
-                        writer.release()
-                        writer = None
                     with self.lock:
                         self.connected = False
                 with self.lock:
-                    stream_url = self.url
+                    stream_url = self.low_resolution_url
                 if not stream_url:
                     self.stop_event.wait(0.5)
                     continue
                 if capture is None or not capture.isOpened():
                     if capture is not None:
                         capture.release()
-                    logging.info("Connexion au flux RTSP…")
+                    logging.info("Connexion au flux basse résolution…")
                     capture = cv2.VideoCapture(
                         stream_url, cv2.CAP_FFMPEG,
                         [cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000,
@@ -278,7 +321,7 @@ class Surveillance:
                     if not capture.isOpened():
                         with self.lock:
                             self.connected = False
-                        logging.warning("Connexion RTSP impossible; nouvel essai dans %.0f s", reconnect_delay)
+                        logging.warning("Flux basse résolution indisponible; nouvel essai dans %.0f s", reconnect_delay)
                         capture.release()
                         capture = None
                         self.reconnect_event.wait(reconnect_delay)
@@ -287,58 +330,148 @@ class Surveillance:
                     reconnect_delay = 1.0
                     with self.lock:
                         self.connected = True
-                    logging.info("Connexion RTSP réussie")
+                    logging.info("Flux basse résolution connecté")
                 ok, frame = capture.read()
                 if not ok or frame is None:
-                    logging.warning("Flux RTSP interrompu; reconnexion automatique")
+                    logging.warning("Flux basse résolution interrompu; reconnexion automatique")
                     capture.release()
                     capture = None
                     with self.lock:
                         self.connected = False
-                    if writer is not None:
-                        writer.release()
-                        writer = None
                     self.reconnect_event.wait(1.0)
                     continue
                 now = time.monotonic()
                 with self.lock:
                     self.latest_frame = frame
                     self.capture_fps = 1 / (now - previous_frame_at) if previous_frame_at else 0.0
-                    should_record = self.record_requested and self.recording_enabled
-                    last_detection = self.last_detection
                 previous_frame_at = now
-                height, width = frame.shape[:2]
-                if should_record and writer is None:
-                    self.output_dir.mkdir(parents=True, exist_ok=True)
-                    filename = self.output_dir / f"{datetime.now():%Y%m%d_%H%M%S}.mp4"
-                    fps = capture.get(cv2.CAP_PROP_FPS)
-                    writer = cv2.VideoWriter(str(filename), cv2.VideoWriter_fourcc(*"mp4v"),
-                                             fps if fps and fps > 0 else 10.0, (width, height))
-                    if not writer.isOpened():
-                        logging.error("Impossible de créer le fichier MP4 dans captures/ (%dx%d)", width, height)
-                        writer.release()
-                        writer = None
-                    else:
-                        last_size = (width, height)
-                        logging.info("[ALERTE] Début de l'enregistrement: %s", filename)
-                if writer is not None:
-                    if (width, height) != last_size:
-                        writer.release()
-                        writer = None
-                        logging.warning("Résolution du flux modifiée; enregistrement fermé")
-                    elif not should_record or time.monotonic() - last_detection >= self.no_detection_seconds:
-                        writer.release()
-                        writer = None
-                        logging.info("Fin de l'enregistrement")
-                    else:
-                        writer.write(frame)
         finally:
             with self.lock:
                 self.connected = False
             if capture is not None:
                 capture.release()
-            if writer is not None:
-                writer.release()
+
+    def recording_loop(self) -> None:
+        capture: Any = None
+        writer: Any = None
+        writer_path: Path | None = None
+        writer_frames = 0
+        last_size: tuple[int, int] | None = None
+        reconnect_delay = 1.0
+        warned_missing_source = False
+
+        def close_writer() -> None:
+            nonlocal writer, writer_path, writer_frames, last_size
+            current_writer = writer
+            current_path = writer_path
+            current_frames = writer_frames
+            writer = None
+            writer_path = None
+            writer_frames = 0
+            last_size = None
+            if current_writer is not None:
+                current_writer.release()
+            if current_frames == 0 and current_path is not None:
+                try:
+                    current_path.unlink(missing_ok=True)
+                except OSError:
+                    logging.warning("Impossible de supprimer le MP4 vide")
+            with self.lock:
+                self.recording_active = False
+
+        def close_capture() -> None:
+            nonlocal capture
+            if capture is not None:
+                capture.release()
+                capture = None
+
+        def should_record_unlocked() -> bool:
+            if not (self.record_requested and self.recording_enabled):
+                return False
+            if (self.no_detection_seconds > 0
+                    and time.monotonic() - self.last_detection >= self.no_detection_seconds):
+                self.record_requested = False
+                return False
+            return True
+
+        try:
+            while not self.stop_event.is_set():
+                if self.recording_reconnect_event.is_set():
+                    self.recording_reconnect_event.clear()
+                    close_writer()
+                    close_capture()
+                with self.lock:
+                    should_record = should_record_unlocked()
+                    stream_url = self.high_resolution_url
+                if not should_record:
+                    close_writer()
+                    close_capture()
+                    self.recording_wakeup_event.wait(0.25)
+                    self.recording_wakeup_event.clear()
+                    continue
+                if not stream_url:
+                    if not warned_missing_source:
+                        logging.warning("Flux haute résolution non configuré; enregistrement impossible")
+                        warned_missing_source = True
+                    self.stop_event.wait(0.25)
+                    continue
+                warned_missing_source = False
+                if capture is None or not capture.isOpened():
+                    close_capture()
+                    logging.info("Connexion au flux haute résolution pour l'enregistrement…")
+                    capture = cv2.VideoCapture(
+                        stream_url, cv2.CAP_FFMPEG,
+                        [cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000,
+                         cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000],
+                    )
+                    if not capture.isOpened():
+                        logging.warning("Flux haute résolution indisponible; nouvel essai dans %.0f s", reconnect_delay)
+                        capture.release()
+                        capture = None
+                        self.recording_wakeup_event.wait(reconnect_delay)
+                        self.recording_wakeup_event.clear()
+                        reconnect_delay = min(reconnect_delay * 2, 30.0)
+                        continue
+                    reconnect_delay = 1.0
+                    logging.info("Flux haute résolution connecté")
+                ok, frame = capture.read()
+                if not ok or frame is None:
+                    logging.warning("Flux haute résolution interrompu; reconnexion automatique")
+                    close_writer()
+                    close_capture()
+                    self.stop_event.wait(1.0)
+                    continue
+                with self.lock:
+                    should_record = should_record_unlocked()
+                if not should_record:
+                    close_writer()
+                    close_capture()
+                    continue
+                height, width = frame.shape[:2]
+                if writer is None:
+                    self.output_dir.mkdir(parents=True, exist_ok=True)
+                    filename = self.output_dir / f"{datetime.now():%Y%m%d_%H%M%S_%f}.mp4"
+                    fps = capture.get(cv2.CAP_PROP_FPS)
+                    writer_path = filename
+                    writer = cv2.VideoWriter(str(filename), cv2.VideoWriter_fourcc(*"mp4v"),
+                                             fps if fps and fps > 0 else 10.0, (width, height))
+                    if not writer.isOpened():
+                        logging.error("Impossible de créer le MP4 haute résolution (%dx%d)", width, height)
+                        close_writer()
+                        continue
+                    last_size = (width, height)
+                    with self.lock:
+                        self.recording_active = True
+                    logging.info("[ALERTE] Début de l'enregistrement haute résolution: %s", filename)
+                elif (width, height) != last_size:
+                    close_writer()
+                    logging.warning("Résolution haute du flux modifiée; clip fermé")
+                    continue
+                writer.write(frame)
+                writer_frames += 1
+        finally:
+            close_writer()
+            close_capture()
 
     def inference_loop(self) -> None:
         while not self.stop_event.is_set():
@@ -363,6 +496,7 @@ class Surveillance:
                     if detections and self.recording_enabled:
                         self.record_requested = True
                         self.last_detection = now
+                        self.recording_wakeup_event.set()
                     elif self.record_requested and now - self.last_detection >= self.no_detection_seconds:
                         self.record_requested = False
                 for detection in detections:
@@ -385,39 +519,66 @@ class Surveillance:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Détection TFLite ciblée sur flux RTSP")
-    parser.add_argument("--mode", choices=("prod", "test"), default="prod",
+    parser = argparse.ArgumentParser(description="Détection TFLite ciblée sur deux flux RTSP")
+    parser.add_argument("--config", type=Path, default=Path("surveillance.config.json"),
+                        help="Fichier JSON local des flux et paramètres")
+    parser.add_argument("--mode", choices=("prod", "test"), default=None,
                         help="prod: headless; test: aperçu web et réglages interactifs")
-    parser.add_argument("--url", default=os.getenv("RTSP_URL"), help="URL RTSP (ou variable RTSP_URL)")
-    parser.add_argument("--model", default="models/ssd_mobilenet_v2_coco_quant_postprocess.tflite")
-    parser.add_argument("--labels", default="models/coco_labels.txt")
-    parser.add_argument("--threshold", type=float, default=float(os.getenv("DETECTION_THRESHOLD", "0.5")))
-    parser.add_argument("--interval", type=float, default=float(os.getenv("INFERENCE_INTERVAL", "0.5")))
-    parser.add_argument("--no-detection-seconds", type=float, default=10.0)
-    parser.add_argument("--output-dir", type=Path, default=Path("captures"))
-    parser.add_argument("--host", default="127.0.0.1", help="Hôte du tableau en mode test")
-    parser.add_argument("--port", type=int, default=8091, help="Port du tableau en mode test")
+    parser.add_argument("--low-url", "--url", dest="low_url", default=None,
+                        help="Remplace le flux basse résolution (détection)")
+    parser.add_argument("--high-url", default=None,
+                        help="Remplace le flux haute résolution (enregistrement)")
+    parser.add_argument("--model", default=None)
+    parser.add_argument("--labels", default=None)
+    parser.add_argument("--threshold", type=float, default=None)
+    parser.add_argument("--interval", type=float, default=None)
+    parser.add_argument("--no-detection-seconds", type=float, default=None)
+    parser.add_argument("--output-dir", type=Path, default=None)
+    parser.add_argument("--host", default=None, help="Hôte du tableau en mode test")
+    parser.add_argument("--port", type=int, default=None, help="Port du tableau en mode test")
     args = parser.parse_args()
-    if not args.url and args.mode == "prod":
-        parser.error("Le mode prod exige --url ou RTSP_URL (ne pas inscrire d'identifiants dans le code).")
-    if not 0 < args.threshold <= 1 or args.interval <= 0 or args.no_detection_seconds < 0:
-        parser.error("Seuil, intervalle ou durée d'arrêt invalide.")
+    try:
+        config = load_config(args.config)
+        overrides = {
+            "mode": args.mode,
+            "low_resolution_url": args.low_url,
+            "high_resolution_url": args.high_url,
+            "model": args.model,
+            "labels": args.labels,
+            "threshold": args.threshold,
+            "interval": args.interval,
+            "no_detection_seconds": args.no_detection_seconds,
+            "output_dir": str(args.output_dir) if args.output_dir is not None else None,
+            "host": args.host,
+            "port": args.port,
+        }
+        config.update({key: value for key, value in overrides.items() if value is not None})
+        config = validate_config(config)
+        save_config(args.config, config)
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
+    if config["mode"] == "prod" and (not config["low_resolution_url"] or not config["high_resolution_url"]):
+        parser.error("Le mode prod exige les deux URL RTSP dans le fichier JSON.")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     cv2.setNumThreads(2)
-    detector = TFLiteDetector(args.model, args.labels, args.threshold)
-    engine = Surveillance(args.url or "", detector, args.threshold, args.interval,
-                          args.no_detection_seconds, args.output_dir,
-                          recording_enabled=True, preview_enabled=args.mode == "test")
-    if args.mode == "prod":
+    detector = TFLiteDetector(config["model"], config["labels"], config["threshold"])
+    engine = Surveillance(
+        config["low_resolution_url"], detector, config["threshold"], config["interval"],
+        config["no_detection_seconds"], Path(config["output_dir"]),
+        recording_enabled=config["recording_enabled"], preview_enabled=config["mode"] == "test",
+        high_resolution_url=config["high_resolution_url"], config_path=args.config, config_data=config,
+    )
+    if config["mode"] == "prod":
         engine.run()
         return
 
     from surveillance_web import create_app
 
     engine.start()
-    logging.info("Mode test — tableau disponible sur http://%s:%d", args.host, args.port)
+    logging.info("Mode test — tableau disponible sur http://%s:%d", config["host"], config["port"])
     try:
-        create_app(engine).run(host=args.host, port=args.port, debug=False, threaded=True, use_reloader=False)
+        create_app(engine).run(host=config["host"], port=config["port"], debug=False,
+                              threaded=True, use_reloader=False)
     except KeyboardInterrupt:
         logging.info("Arrêt demandé")
     finally:

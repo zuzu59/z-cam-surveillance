@@ -217,5 +217,11 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+# Local camera credentials and runtime state
+/surveillance.config.json
+/.surveillance.config.json.tmp
+/surveillance.config.json.tmp
+/.runtime/
+
 # Local event video output
 captures/

@@ -104,9 +104,9 @@ h1 { margin-bottom: 5px; font-size: 26px; line-height: 1.2; letter-spacing: -.03
 .source-state { display: flex; align-items: center; gap: 7px; margin-bottom: 9px; color: var(--muted); font-size: 10px; }
 .source-state .status-dot { width: 6px; height: 6px; }
 .source-state .status-dot.inactive { background: var(--amber); box-shadow: 0 0 0 3px rgb(240 189 105 / 12%); }
-#stream-url, .field-group input[type="number"] { width: 100%; height: 37px; padding: 0 10px; outline: none; border: 1px solid #34404a; border-radius: 6px; background: #0c1116; color: var(--text); font-size: 11px; transition: border-color .15s ease, box-shadow .15s ease; }
-#stream-url::placeholder { color: #8997a2; }
-#stream-url:focus, .field-group input[type="number"]:focus { border-color: #69b78d; box-shadow: 0 0 0 3px rgb(88 214 154 / 12%); }
+#low-stream-url, #high-stream-url, .field-group input[type="number"] { width: 100%; height: 37px; padding: 0 10px; outline: none; border: 1px solid #34404a; border-radius: 6px; background: #0c1116; color: var(--text); font-size: 11px; transition: border-color .15s ease, box-shadow .15s ease; }
+#low-stream-url::placeholder, #high-stream-url::placeholder { color: #8997a2; }
+#low-stream-url:focus, #high-stream-url:focus, .field-group input[type="number"]:focus { border-color: #69b78d; box-shadow: 0 0 0 3px rgb(88 214 154 / 12%); }
 .field-hint { margin: 7px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
 input[type="range"] { width: 100%; height: 5px; margin: 2px 0 0; appearance: none; border-radius: 99px; background: linear-gradient(to right, #5bcf91 0%, #5bcf91 var(--range-progress, 48%), #34404a var(--range-progress, 48%), #34404a 100%); cursor: pointer; }
 input[type="range"]::-webkit-slider-thumb { width: 15px; height: 15px; appearance: none; border: 3px solid #102018; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 1px #58d69a; }
