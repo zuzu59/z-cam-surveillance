@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Surveillance · Console de test</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+  <script src="{{ url_for('static', filename='dashboard.js') }}" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="identity" href="/" aria-label="Console de surveillance">
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7.5h3l1.7-2h8.6l1.7 2h3v11H3z"/><circle cx="12" cy="13" r="4"/></svg></span>
+      <span class="identity-copy"><strong>Fieldwatch</strong><span>Console de surveillance</span></span>
+    </a>
+    <div class="topbar-right"><span class="mode-chip"><i></i> MODE TEST</span><span class="local-note">Traitement local · aucun cloud</span></div>
+  </header>
+
+  <main class="workspace">
+    <div class="page-heading">
+      <div><p class="eyebrow">RTSP / ANALYSE EN DIRECT</p><h1>Caméra de surveillance</h1><p class="lede">Aperçu échantillonné et réglages temporaires de l’analyse.</p></div>
+      <div class="connection-pill" id="connection-pill"><span class="status-dot"></span><span id="connection-text">Connexion en cours</span></div>
+    </div>
+
+    <section class="layout" aria-label="Aperçu et configuration">
+      <div class="main-column">
+        <section class="preview-panel" aria-labelledby="preview-title">
+          <div class="panel-heading">
+            <div><h2 id="preview-title">Aperçu caméra</h2><p id="preview-meta">En attente de la première image</p></div>
+            <div class="preview-actions"><span class="sample-chip"><span class="pulse-dot"></span> Image analysée</span>
+              <label class="toggle overlay-toggle"><input id="overlay-toggle" type="checkbox" checked><span class="toggle-track"></span><span>Zones IA</span></label>
+            </div>
+          </div>
+          <div class="video-stage" id="video-stage">
+            <div class="empty-state" id="empty-state"><span class="empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7.5h3l1.7-2h8.6l1.7 2h3v11H3z"/><circle cx="12" cy="13" r="4"/></svg></span><strong>En attente du flux vidéo</strong><span>La première image apparaîtra après connexion à la caméra.</span></div>
+            <img id="preview-image" src="/video_feed" alt="Dernière image analysée de la caméra" hidden>
+            <svg id="detection-overlay" class="detection-overlay" viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true"></svg>
+            <div class="video-hud"><span><i class="hud-dot"></i> RTSP</span><span id="frame-label">—</span></div>
+          </div>
+          <div class="preview-footer"><span><span class="legend-box"></span> Objets repérés au dernier passage</span><span id="sample-rate">Analyse toutes les 0,5 s</span></div>
+        </section>
+
+        <section class="detections-panel" aria-labelledby="detections-title">
+          <div class="panel-heading detection-heading"><div><h2 id="detections-title">Détections récentes</h2><p>Classes cibles : personne, voiture, vélo, moto, chien, chat</p></div><span class="count-badge" id="detection-count">0</span></div>
+          <div id="detection-list" class="detection-list"><div class="quiet-empty"><span class="quiet-empty-dot"></span>Aucune détection sur la dernière image analysée.</div></div>
+        </section>
+      </div>
+
+      <aside class="settings-panel" aria-labelledby="settings-title">
+        <div class="panel-heading settings-heading"><div><h2 id="settings-title">Réglages</h2><p>Modifiables sans redémarrer le moteur.</p></div><span class="settings-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h9m4 0h3M4 17h3m4 0h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg></span></div>
+        <form id="settings-form" autocomplete="off">
+          <div class="field-group source-group">
+            <label for="stream-url">Source RTSP</label>
+            <div class="source-state"><span class="status-dot" id="source-dot"></span><span id="source-state-text">Chargement…</span></div>
+            <input id="stream-url" name="url" type="password" inputmode="url" spellcheck="false" autocomplete="new-password" placeholder="rtsp://hôte:port/chemin" aria-describedby="source-help">
+            <p class="field-hint" id="source-help">Laissez vide pour conserver la source. L’URL reste en mémoire et n’est jamais affichée ni enregistrée.</p>
+          </div>
+
+          <div class="field-group">
+            <div class="label-row"><label for="threshold">Seuil de confiance</label><output id="threshold-value" for="threshold">50 %</output></div>
+            <input id="threshold" name="threshold" type="range" min="0.05" max="0.99" step="0.01" value="0.5">
+            <div class="range-hints"><span>Plus sensible</span><span>Moins de faux positifs</span></div>
+          </div>
+
+          <div class="field-group">
+            <div class="label-row"><label for="interval">Cadence d’analyse</label><span class="unit">secondes</span></div>
+            <div class="number-input"><button type="button" class="stepper" data-step="-0.1" data-target="interval" aria-label="Diminuer la cadence">−</button><input id="interval" name="interval" type="number" min="0.2" max="30" step="0.1" value="0.5"><button type="button" class="stepper" data-step="0.1" data-target="interval" aria-label="Augmenter la cadence">+</button></div>
+            <p class="field-hint">Une cadence plus lente réduit la charge CPU.</p>
+          </div>
+
+          <div class="field-group">
+            <div class="label-row"><label for="cooldown">Fin d’enregistrement</label><span class="unit">secondes sans détection</span></div>
+            <input id="cooldown" name="no_detection_seconds" type="number" min="0" max="3600" step="1" value="10">
+          </div>
+
+          <div class="recording-setting"><div><strong>Enregistrement événementiel</strong><span>MP4 pendant les détections</span></div><label class="toggle"><input id="recording-enabled" type="checkbox" checked><span class="toggle-track"></span><span class="sr-only">Activer l’enregistrement</span></label></div>
+          <div class="form-feedback" id="form-feedback" role="status" aria-live="polite"></div>
+          <button class="apply-button" type="submit"><span>Appliquer les réglages</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button>
+        </form>
+
+        <div class="runtime-note"><span class="runtime-icon" aria-hidden="true">i</span><p>Le mode test ajoute l’aperçu vidéo et l’interface web. En production, le même moteur tourne sans interface.</p></div>
+        <div class="engine-stats"><div><span>Flux</span><strong id="stat-resolution">—</strong></div><div><span>Images reçues</span><strong id="stat-fps">—</strong></div><div><span>Enregistrement</span><strong id="stat-recording">ARRÊTÉ</strong></div></div>
+      </aside>
+    </section>
+    <footer class="page-footer"><span>Fieldwatch · traitement sur ce serveur</span><span>Les réglages du mode test ne sont pas persistés.</span></footer>
+  </main>
+</body>
+</html>
