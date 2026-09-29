@@ -24,3 +24,9 @@ Voici le cahier des charges strict pour la boucle d'exécution et de vérificati
    - Gère proprement les exceptions (perte de connexion Wi-Fi de la caméra avec reconnexions automatiques).
 
 Génère le code complet, explique-moi la structure et donne-moi les commandes terminal pour installer les dépendances (OpenCV et le runtime TFLite) sur mon Raspberry Pi 3.
+
+Je veux que tu testes l'appli en vrai en utilisant ton browser headless chromium/playwrite et sauvegarde tous les screenshots (et garde l'historique de progression) que tu auras fait dans le dossier screenshots dans CE projet préfixés avec la date yymmdd.hhmmss
+
+# IMPORTANT:
+Vérifies qu'aucun passwords RTSP ne se retrouvent dans les copies d'écran et/ou commits !
+
