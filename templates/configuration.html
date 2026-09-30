@@ -1,16 +1,36 @@
 {% extends "base.html" %}
-{% block title %}Configuration · Fieldwatch{% endblock %}
+{% block title %}Configuration · z-cam-surveillance{% endblock %}
 {% block page_class %}configuration-page{% endblock %}
 {% block content %}
 <main class="workspace narrow-workspace">
   <div class="page-heading"><div><p class="eyebrow">APPLICATION / PARAMÈTRES</p><h1>Configuration</h1><p class="lede">Modifiez et sauvegardez en une fois les paramètres du fichier JSON local.</p></div></div>
   <section class="configuration-panel">
-    <div class="panel-heading"><div><h2>Paramètres de surveillance</h2><p>Les URL RTSP sont masquées et ne sont jamais affichées après sauvegarde.</p></div></div>
+    <div class="panel-heading"><div><h2>Paramètres de surveillance</h2><p>Les URL RTSP restent masquées par défaut. Utilisez l’œil pour les révéler à la demande.</p></div></div>
     <form id="config-form" class="config-form" autocomplete="off">
       <fieldset class="config-section"><legend>Sources vidéo</legend>
         <div class="config-grid">
-          <div class="field-group"><label for="low-resolution-url">URL basse résolution · détection</label><input id="low-resolution-url" type="password" inputmode="url" spellcheck="false" autocomplete="new-password" placeholder="Laisser vide pour conserver l’URL actuelle"><p class="field-hint" id="low-url-status">État de l’URL : chargement…</p><label class="check-row"><input id="clear-low-url" type="checkbox"><span>Effacer l’URL mémorisée</span></label></div>
-          <div class="field-group"><label for="high-resolution-url">URL haute résolution · enregistrement</label><input id="high-resolution-url" type="password" inputmode="url" spellcheck="false" autocomplete="new-password" placeholder="Laisser vide pour conserver l’URL actuelle"><p class="field-hint" id="high-url-status">État de l’URL : chargement…</p><label class="check-row"><input id="clear-high-url" type="checkbox"><span>Effacer l’URL mémorisée</span></label></div>
+          <div class="field-group">
+            <label for="low-resolution-url">URL basse résolution · détection</label>
+            <div class="secret-input">
+              <input id="low-resolution-url" type="password" inputmode="url" spellcheck="false" autocomplete="new-password" placeholder="Laisser vide pour conserver l’URL actuelle">
+              <button class="secret-toggle" type="button" data-source="low" data-target="low-resolution-url" aria-label="Afficher l’URL basse résolution" aria-pressed="false" disabled>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path class="eye-outline" d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle class="eye-pupil" cx="12" cy="12" r="3"/><path class="eye-slash" d="m4 4 16 16" hidden/></svg>
+              </button>
+            </div>
+            <p class="field-hint" id="low-url-status">État de l’URL : chargement…</p>
+            <label class="check-row"><input id="clear-low-url" type="checkbox"><span>Effacer l’URL mémorisée</span></label>
+          </div>
+          <div class="field-group">
+            <label for="high-resolution-url">URL haute résolution · enregistrement</label>
+            <div class="secret-input">
+              <input id="high-resolution-url" type="password" inputmode="url" spellcheck="false" autocomplete="new-password" placeholder="Laisser vide pour conserver l’URL actuelle">
+              <button class="secret-toggle" type="button" data-source="high" data-target="high-resolution-url" aria-label="Afficher l’URL haute résolution" aria-pressed="false" disabled>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path class="eye-outline" d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle class="eye-pupil" cx="12" cy="12" r="3"/><path class="eye-slash" d="m4 4 16 16" hidden/></svg>
+              </button>
+            </div>
+            <p class="field-hint" id="high-url-status">État de l’URL : chargement…</p>
+            <label class="check-row"><input id="clear-high-url" type="checkbox"><span>Effacer l’URL mémorisée</span></label>
+          </div>
         </div>
       </fieldset>
 
@@ -37,7 +57,7 @@
       <button class="apply-button" type="submit">Sauvegarder tous les paramètres</button>
     </form>
   </section>
-  <footer class="page-footer"><span>Le JSON local contient les identifiants RTSP en clair.</span><span>Fichier protégé par permissions système et ignoré par Git.</span></footer>
+  <footer class="page-footer"><span>L’œil affiche l’URL complète, mot de passe compris.</span><span>Accès sans authentification : utilisez un réseau de confiance.</span></footer>
 </main>
 {% endblock %}
 {% block scripts %}<script src="{{ url_for('static', filename='configuration.js') }}" defer></script>{% endblock %}

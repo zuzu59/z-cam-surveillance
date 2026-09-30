@@ -43,6 +43,7 @@ class SurveillanceDashboardTests(unittest.TestCase):
             self.assertIn(b"Aide", response.data)
             self.assertIn(b"propos", response.data)
         self.assertIn(b"Objets d\xc3\xa9tect\xc3\xa9s", self.client.get("/").data)
+        self.assertEqual(APP_VERSION, "0.0.2")
         self.assertIn(APP_VERSION.encode(), self.client.get("/about").data)
         self.assertNotIn(b"MODE TEST", self.client.get("/").data)
 
@@ -101,6 +102,29 @@ class SurveillanceDashboardTests(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(config_path.stat().st_mode), 0o600)
             self.assertTrue(engine.settings_snapshot()["low_stream_configured"])
             self.assertTrue(engine.settings_snapshot()["high_stream_configured"])
+
+    def test_reveal_endpoint_returns_only_the_requested_url(self):
+        low_url = "rtsp://viewer:low-test-pass@192.0.2.30/substream"
+        high_url = "rtsp://viewer:high-test-pass@192.0.2.30/main"
+        engine = Surveillance(low_url, SimpleNamespace(threshold=0.5), 0.5, 0.5, 10,
+                              Path("captures"), high_resolution_url=high_url)
+        client = create_app(engine).test_client()
+
+        config_body = client.get("/api/config").get_data(as_text=True)
+        self.assertNotIn("low-test-pass", config_body)
+        self.assertNotIn("high-test-pass", config_body)
+        self.assertNotIn(low_url, client.get("/configuration").get_data(as_text=True))
+        self.assertEqual(client.post("/api/config/reveal", json={"source": "low"}).status_code, 403)
+
+        headers = {"X-Requested-With": "XMLHttpRequest"}
+        low_response = client.post("/api/config/reveal", json={"source": "low"}, headers=headers)
+        high_response = client.post("/api/config/reveal", json={"source": "high"}, headers=headers)
+        self.assertEqual(low_response.status_code, 200)
+        self.assertEqual(low_response.get_json(), {"url": low_url})
+        self.assertEqual(high_response.status_code, 200)
+        self.assertEqual(high_response.get_json(), {"url": high_url})
+        invalid = client.post("/api/config/reveal", json={"source": "other"}, headers=headers)
+        self.assertEqual(invalid.status_code, 400)
 
     def test_configuration_page_saves_all_json_parameters(self):
         with TemporaryDirectory() as directory:

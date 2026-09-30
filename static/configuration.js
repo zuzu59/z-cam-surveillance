@@ -5,6 +5,7 @@
     ["low-resolution-url", "clear-low-url"],
     ["high-resolution-url", "clear-high-url"],
   ];
+  const secretToggles = [...document.querySelectorAll(".secret-toggle")];
   const textFields = ["output-dir", "model", "labels", "host"];
   const numberFields = ["threshold", "interval", "no-detection-seconds", "port"];
   const restartLabels = { model: "modèle", labels: "labels", host: "adresse d’écoute", port: "port" };
@@ -14,6 +15,13 @@
     feedback.textContent = message;
     feedback.className = `form-feedback${type ? ` ${type}` : ""}`;
   };
+  const setSecretVisibility = (button, visible) => {
+    const input = $(button.dataset.target);
+    input.type = visible ? "text" : "password";
+    button.setAttribute("aria-pressed", String(visible));
+    button.setAttribute("aria-label", `${visible ? "Masquer" : "Afficher"} l’URL ${button.dataset.source === "low" ? "basse résolution" : "haute résolution"}`);
+    button.querySelector(".eye-slash").hidden = !visible;
+  };
   const hydrate = (config) => {
     numberFields.forEach((id) => {
       const key = id.replaceAll("-", "_");
@@ -21,8 +29,14 @@
     });
     textFields.forEach((id) => $(id).value = config[id.replaceAll("-", "_")]);
     $("recording-enabled").checked = config.recording_enabled;
-    $("low-url-status").textContent = config.low_stream_configured ? "URL mémorisée localement (valeur masquée)" : "Aucune URL mémorisée";
-    $("high-url-status").textContent = config.high_stream_configured ? "URL mémorisée localement (valeur masquée)" : "Aucune URL mémorisée";
+    $("low-url-status").textContent = config.low_stream_configured ? "URL mémorisée · cliquer sur l’œil pour l’afficher" : "Aucune URL mémorisée";
+    $("high-url-status").textContent = config.high_stream_configured ? "URL mémorisée · cliquer sur l’œil pour l’afficher" : "Aucune URL mémorisée";
+    secretToggles.forEach((button) => {
+      const configured = button.dataset.source === "low" ? config.low_stream_configured : config.high_stream_configured;
+      button.dataset.configured = String(Boolean(configured));
+      button.disabled = !configured || $(button.dataset.source === "low" ? "clear-low-url" : "clear-high-url").checked;
+      setSecretVisibility(button, false);
+    });
   };
   const loadConfig = async () => {
     try {
@@ -41,12 +55,50 @@
   };
 
   urlFields.forEach(([inputId, clearId]) => {
+    const toggle = secretToggles.find((button) => button.dataset.target === inputId);
     $(inputId).addEventListener("input", () => {
       if ($(inputId).value.trim()) $(clearId).checked = false;
+      toggle.disabled = $(clearId).checked || toggle.dataset.configured !== "true";
     });
     $(clearId).addEventListener("change", () => {
       $(inputId).disabled = $(clearId).checked;
-      if ($(clearId).checked) $(inputId).value = "";
+      if ($(clearId).checked) {
+        $(inputId).value = "";
+        setSecretVisibility(toggle, false);
+      }
+      toggle.disabled = $(clearId).checked || toggle.dataset.configured !== "true";
+    });
+  });
+
+  secretToggles.forEach((button) => {
+    button.addEventListener("click", async () => {
+      const input = $(button.dataset.target);
+      if (input.type === "text") {
+        setSecretVisibility(button, false);
+        return;
+      }
+      if (input.value) {
+        setSecretVisibility(button, true);
+        return;
+      }
+      button.disabled = true;
+      try {
+        const response = await fetch("/api/config/reveal", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest" },
+          body: JSON.stringify({ source: button.dataset.source }),
+          cache: "no-store",
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Impossible d’afficher cette URL.");
+        input.value = result.url;
+        setSecretVisibility(button, true);
+      } catch (error) {
+        showFeedback(error.message || "Impossible d’afficher cette URL.", "error");
+      } finally {
+        button.disabled = $(button.dataset.source === "low" ? "clear-low-url" : "clear-high-url").checked
+          || button.dataset.configured !== "true";
+      }
     });
   });
 
@@ -83,9 +135,12 @@
       if (!response.ok) throw new Error(result.error || "Configuration refusée.");
       hydrate(result.config);
       urlFields.forEach(([inputId, clearId]) => {
+        const toggle = secretToggles.find((button) => button.dataset.target === inputId);
         $(inputId).value = "";
+        $(inputId).type = "password";
         $(inputId).disabled = false;
         $(clearId).checked = false;
+        setSecretVisibility(toggle, false);
       });
       const pending = result.config.restart_required_fields || [];
       const names = pending.map((field) => restartLabels[field] || field);

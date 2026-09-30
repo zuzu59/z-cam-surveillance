@@ -4,15 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>{% block title %}Fieldwatch{% endblock %}</title>
+  <title>{% block title %}z-cam-surveillance{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
   {% block head %}{% endblock %}
 </head>
 <body class="{% block page_class %}{% endblock %}">
   <header class="topbar">
-    <a class="identity" href="/" aria-label="Fieldwatch, détection">
+    <a class="identity" href="/" aria-label="z-cam-surveillance, détection">
       <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7.5h3l1.7-2h8.6l1.7 2h3v11H3z"/><circle cx="12" cy="13" r="4"/></svg></span>
-      <span class="identity-copy"><strong>Fieldwatch</strong><span>Surveillance vidéo locale</span></span>
+      <span class="identity-copy"><strong>z-cam-surveillance</strong><span>Surveillance vidéo locale</span></span>
     </a>
     <nav class="main-nav" aria-label="Navigation principale">
       <a href="/" {% if active_page == 'home' %}aria-current="page"{% endif %}>Détection</a>

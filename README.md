@@ -6,7 +6,7 @@ Application web locale de surveillance RTSP et détection d’objets. Elle analy
 
 - **Détection** (`/`) : aperçu caméra, cadres, labels et état des flux/enregistrements.
 - **Configuration** (`/configuration`) : formulaire unique pour modifier l’ensemble des paramètres persistés.
-- **Aide** (`/help`) et **À propos** (`/about`). La version initiale est `0.0.1`; elle ne s’incrémente pas automatiquement.
+- **Aide** (`/help`) et **À propos** (`/about`). La version est `0.0.2`; elle ne s’incrémente pas automatiquement et n’est incrémentée que sur demande du propriétaire.
 
 Le modèle SSD MobileNet V2 COCO quantifié inclus dans `models/` détecte `person`, `car`, `bicycle`, `motorcycle`, `dog` et `cat`. Le flux basse résolution alimente la capture et l’inférence (0,5 seconde entre les analyses par défaut). Lorsqu’une détection est présente, le moteur ouvre le flux haute résolution et enregistre celui-ci en MP4 dans `captures/`; il ferme le clip après 10 secondes sans détection et ferme le flux haute résolution en dehors des événements. Aucun affichage OpenCV n’est utilisé.
 
@@ -46,7 +46,7 @@ Au premier lancement, l’application crée `surveillance.config.json` à partir
 
 Les paramètres modifiables à chaud sont appliqués immédiatement. Les changements de modèle, labels, adresse ou port sont sauvegardés et signalés dans la page, mais prennent effet au prochain redémarrage. Un champ URL laissé vide conserve la valeur mémorisée; une case dédiée permet d’effacer une URL.
 
-`surveillance.config.json` est ignoré par Git et ses permissions sont limitées au propriétaire (`0600`). Il contient les identifiants RTSP **en clair sur le disque** : protégez l’accès au compte système et ne copiez/committez jamais ce fichier. L’interface et l’API ne renvoient jamais ces URL. Le fichier d’exemple ne contient aucun identifiant.
+`surveillance.config.json` est ignoré par Git et ses permissions sont limitées au propriétaire (`0600`). Il contient les identifiants RTSP **en clair sur le disque** : protégez l’accès au compte système et ne copiez/committez jamais ce fichier. Les réponses de configuration ordinaires masquent les URL; le bouton œil de la page Configuration demande explicitement l’affichage d’une seule URL à la fois. Le serveur n’a pas d’authentification : toute personne pouvant accéder à l’application peut révéler ces identifiants, réservez donc son accès à un réseau et à des appareils de confiance. Le fichier d’exemple ne contient aucun identifiant.
 
 Les options de lancement disponibles sont consultables avec `./start.sh --help`. Elles sont destinées au démarrage et leurs valeurs sont persistées dans le fichier JSON; évitez de fournir des URL contenant des identifiants dans l’historique du shell. Les réglages usuels se font depuis la page Configuration.
 

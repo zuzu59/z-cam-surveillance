@@ -1,13 +1,13 @@
 {% extends "base.html" %}
-{% block title %}À propos · Fieldwatch{% endblock %}
+{% block title %}À propos · z-cam-surveillance{% endblock %}
 {% block page_class %}info-page about-page{% endblock %}
 {% block content %}
 <main class="workspace narrow-workspace">
-  <div class="page-heading"><div><p class="eyebrow">APPLICATION</p><h1>À propos</h1><p class="lede">Informations sur Fieldwatch et sa version.</p></div></div>
+  <div class="page-heading"><div><p class="eyebrow">APPLICATION</p><h1>À propos</h1><p class="lede">Informations sur z-cam-surveillance et sa version.</p></div></div>
   <section class="info-panel">
-    <div class="about-identity"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7.5h3l1.7-2h8.6l1.7 2h3v11H3z"/><circle cx="12" cy="13" r="4"/></svg></span><div><h2>Fieldwatch</h2><p>Application web de surveillance vidéo locale</p></div></div>
+    <div class="about-identity"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7.5h3l1.7-2h8.6l1.7 2h3v11H3z"/><circle cx="12" cy="13" r="4"/></svg></span><div><h2>z-cam-surveillance</h2><p>Application web de surveillance vidéo locale</p></div></div>
     <dl class="about-details"><div><dt>Version</dt><dd id="app-version">{{ app_version }}</dd></div><div><dt>Analyse</dt><dd>SSD MobileNet V2 · COCO</dd></div><div><dt>Traitement</dt><dd>Local, sur le serveur de l’application</dd></div></dl>
-    <p>Fieldwatch analyse un flux RTSP basse résolution et peut enregistrer les événements depuis un flux haute résolution. Les paramètres sont stockés dans un fichier JSON local protégé par les permissions du système.</p>
+    <p>z-cam-surveillance analyse un flux RTSP basse résolution et peut enregistrer les événements depuis un flux haute résolution. Les paramètres sont stockés dans un fichier JSON local protégé par les permissions du système.</p>
     <p class="field-hint">La version reste inchangée jusqu’à ce que le responsable du projet demande son incrémentation.</p>
   </section>
 </main>

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Aide · Fieldwatch{% endblock %}
+{% block title %}Aide · z-cam-surveillance{% endblock %}
 {% block page_class %}info-page help-page{% endblock %}
 {% block content %}
 <main class="workspace narrow-workspace">
@@ -10,7 +10,7 @@
     <article><h2>3. Détections prises en charge</h2><p>Le modèle recherche les personnes, voitures, vélos, motos, chiens et chats. Ajustez le seuil de confiance et la cadence depuis Configuration.</p></article>
     <article><h2>4. Enregistrements</h2><p>Lorsqu’une détection est présente et que l’enregistrement est activé, un clip MP4 est créé dans le dossier configuré. Le clip se termine après le délai choisi sans nouvelle détection.</p></article>
     <article><h2>Redémarrage requis</h2><p>Les changements du modèle, des labels, de l’adresse ou du port du serveur sont sauvegardés immédiatement, mais nécessitent un redémarrage de l’application pour prendre effet. Les autres paramètres sont appliqués sans redémarrage.</p></article>
-    <article><h2>Confidentialité et accès</h2><p>Les URL RTSP, y compris les identifiants, sont stockées en clair dans le JSON local, protégé par les permissions du compte système. L’interface ne les restitue pas. Le serveur web n’a pas d’authentification : limitez son accès à un réseau de confiance et ne l’exposez pas directement à Internet.</p></article>
+    <article><h2>Confidentialité et accès</h2><p>Les URL RTSP, y compris les mots de passe, sont stockées en clair dans le JSON local, protégé par les permissions du compte système. Dans Configuration, l’œil révèle explicitement une seule URL à la fois. Le serveur web n’a pas d’authentification : toute personne pouvant y accéder peut révéler les identifiants. Limitez son accès à un réseau et à des appareils de confiance; ne l’exposez pas directement à Internet.</p></article>
   </section>
 </main>
 {% endblock %}

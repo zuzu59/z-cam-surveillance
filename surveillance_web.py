@@ -37,8 +37,21 @@ def create_app(engine: Any) -> Flask:
 
     @app.get("/api/state")
     def state() -> Any:
-        # The stream URL is intentionally never included in API responses.
+        # The stream URL is intentionally never included in status responses.
         return jsonify(engine.status_snapshot())
+
+    @app.post("/api/config/reveal")
+    def reveal_configured_url() -> Any:
+        # The custom header prevents a cross-origin HTML form from reading secrets.
+        if request.headers.get("X-Requested-With") != "XMLHttpRequest":
+            return jsonify(ok=False, error="Demande de révélation invalide."), 403
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or payload.get("source") not in {"low", "high"}:
+            return jsonify(ok=False, error="Source vidéo invalide."), 400
+        url = engine.reveal_stream_url(payload["source"])
+        if not url:
+            return jsonify(ok=False, error="Aucune URL enregistrée pour cette source."), 404
+        return jsonify(url=url)
 
     @app.post("/api/config")
     def configure() -> Any:

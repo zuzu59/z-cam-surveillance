@@ -294,6 +294,15 @@ class Surveillance:
             })
             return snapshot
 
+    def reveal_stream_url(self, source: str) -> str:
+        """Return exactly one saved RTSP URL after an explicit reveal request."""
+        with self.lock:
+            if source == "low":
+                return self.low_resolution_url
+            if source == "high":
+                return self.high_resolution_url
+            raise ValueError("Source vidéo invalide.")
+
     def preview_snapshot(self) -> tuple[int, bytes | None]:
         with self.lock:
             return self.preview_sequence, self.latest_jpeg
@@ -537,7 +546,8 @@ class Surveillance:
 def main() -> None:
     from app_version import APP_VERSION
 
-    parser = argparse.ArgumentParser(description="Application web de surveillance RTSP avec détection TFLite")
+    parser = argparse.ArgumentParser(prog="z-cam-surveillance",
+                                     description="Application web de surveillance RTSP avec détection TFLite")
     parser.add_argument("--version", action="version", version=f"%(prog)s {APP_VERSION}")
     parser.add_argument("--config", type=Path, default=Path("surveillance.config.json"),
                         help="Fichier JSON local des flux et paramètres")

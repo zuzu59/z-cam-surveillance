@@ -206,3 +206,12 @@ input[type="range"]:focus-visible { outline: 2px solid #9bcdf5; outline-offset: 
 @media (max-width: 900px) { .dashboard-grid { grid-template-columns: 1fr; } .overview-panel { display: grid; grid-template-columns: 1fr 1fr; column-gap: 20px; } .overview-panel > .panel-heading, .overview-panel > .inline-link { grid-column: 1 / -1; } .overview-stats { align-content: start; } .stream-status { align-content: start; margin-top: 15px; } }
 @media (max-width: 700px) { .topbar { padding: 12px 18px; } .main-nav { order: 3; width: 100%; justify-content: flex-start; overflow-x: auto; } .main-nav a { padding: 8px 9px; } .topbar-right { margin-left: auto; } }
 @media (max-width: 560px) { .topbar { display: flex; align-items: center; padding: 10px 13px 0; } .identity-copy span, .topbar-right { display: none; } .main-nav { gap: 0; margin: 0 -3px; } .main-nav a { padding: 9px 8px; font-size: 10px; } .dashboard-grid { gap: 12px; } .overview-panel { display: block; padding: 0 14px 14px; } .overview-panel > .panel-heading { margin: 0 -14px; padding-right: 14px; padding-left: 14px; } .config-form { padding: 0 13px 15px; } .config-grid { grid-template-columns: 1fr; gap: 0; } .info-panel { padding: 17px; } }
+.secret-input { display: flex; width: 100%; min-width: 0; overflow: hidden; border: 1px solid #34404a; border-radius: 6px; background: #0c1116; }
+.secret-input:focus-within { border-color: #69b78d; box-shadow: 0 0 0 3px rgb(88 214 154 / 12%); }
+.config-form .secret-input input[type="password"], .config-form .secret-input input[type="text"] { flex: 1 1 auto; width: 0; height: 38px; border: 0; border-radius: 0; outline: 0; background: transparent; box-shadow: none; }
+.config-form .secret-input input:focus { border: 0; box-shadow: none; }
+.secret-toggle { display: grid; flex: 0 0 42px; place-items: center; width: 42px; min-height: 40px; padding: 0; border: 0; background: transparent; color: #98a7b1; cursor: pointer; }
+.secret-toggle:hover:not(:disabled) { color: #a8e6c2; background: #151d23; }
+.secret-toggle:focus-visible { outline: 2px solid #69b78d; outline-offset: -3px; }
+.secret-toggle:disabled { color: #57636c; cursor: not-allowed; }
+.secret-toggle svg { width: 18px; height: 18px; overflow: visible; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
