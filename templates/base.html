@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>{% block title %}Fieldwatch{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+  {% block head %}{% endblock %}
+</head>
+<body class="{% block page_class %}{% endblock %}">
+  <header class="topbar">
+    <a class="identity" href="/" aria-label="Fieldwatch, détection">
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7.5h3l1.7-2h8.6l1.7 2h3v11H3z"/><circle cx="12" cy="13" r="4"/></svg></span>
+      <span class="identity-copy"><strong>Fieldwatch</strong><span>Surveillance vidéo locale</span></span>
+    </a>
+    <nav class="main-nav" aria-label="Navigation principale">
+      <a href="/" {% if active_page == 'home' %}aria-current="page"{% endif %}>Détection</a>
+      <a href="/configuration" {% if active_page == 'configuration' %}aria-current="page"{% endif %}>Configuration</a>
+      <a href="/help" {% if active_page == 'help' %}aria-current="page"{% endif %}>Aide</a>
+      <a href="/about" {% if active_page == 'about' %}aria-current="page"{% endif %}>À propos</a>
+    </nav>
+    <div class="topbar-right"><span class="local-note">Traitement local · v{{ app_version }}</span></div>
+  </header>
+  {% block content %}{% endblock %}
+  {% block scripts %}{% endblock %}
+</body>
+</html>

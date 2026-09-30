@@ -19,7 +19,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "labels": "models/coco_labels.txt",
     "host": "0.0.0.0",
     "port": 8091,
-    "mode": "test",
 }
 
 
@@ -60,8 +59,6 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("recording_enabled doit être un booléen.")
     if not 1 <= result["port"] <= 65535:
         raise ValueError("Le port doit être compris entre 1 et 65535.")
-    if not isinstance(result["mode"], str) or result["mode"] not in {"prod", "test"}:
-        raise ValueError("Le mode doit être 'prod' ou 'test'.")
     for field in ("output_dir", "model", "labels", "host"):
         if not isinstance(result[field], str) or not result[field].strip():
             raise ValueError(f"Le paramètre {field} doit être une chaîne non vide.")

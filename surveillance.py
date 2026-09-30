@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Threaded RTSP surveillance with headless production and browser test modes."""
+"""Web-based threaded RTSP surveillance application."""
 from __future__ import annotations
 
 import argparse
@@ -128,9 +128,8 @@ class Surveillance:
 
     def __init__(self, low_resolution_url: str, detector: TFLiteDetector, threshold: float,
                  interval: float, no_detection_seconds: float, output_dir: Path,
-                 recording_enabled: bool = True, preview_enabled: bool = False,
-                 high_resolution_url: str = "", config_path: Path | None = None,
-                 config_data: dict[str, Any] | None = None):
+                 recording_enabled: bool = True, high_resolution_url: str = "",
+                 config_path: Path | None = None, config_data: dict[str, Any] | None = None):
         self.low_resolution_url = low_resolution_url
         self.high_resolution_url = high_resolution_url
         self.detector = detector
@@ -139,9 +138,19 @@ class Surveillance:
         self.no_detection_seconds = no_detection_seconds
         self.output_dir = output_dir
         self.recording_enabled = recording_enabled
-        self.preview_enabled = preview_enabled
         self.config_path = config_path
         self.config = DEFAULT_CONFIG.copy() if config_data is None else config_data.copy()
+        self.config.update({
+            "low_resolution_url": low_resolution_url,
+            "high_resolution_url": high_resolution_url,
+            "threshold": threshold,
+            "interval": interval,
+            "no_detection_seconds": no_detection_seconds,
+            "recording_enabled": recording_enabled,
+            "output_dir": str(output_dir),
+        })
+        self.startup_config = self.config.copy()
+        self.pending_restart_fields: set[str] = set()
         self.stop_event = threading.Event()
         self.reconnect_event = threading.Event()
         self.recording_reconnect_event = threading.Event()
@@ -163,52 +172,69 @@ class Surveillance:
         self.recording_thread: threading.Thread | None = None
 
     def update_settings(self, payload: dict[str, Any]) -> None:
-        """Validate, persist, then apply settings without returning secret URLs."""
+        """Validate and persist the full JSON configuration without exposing RTSP URLs."""
         with self.lock:
             candidate = self.config.copy()
-            threshold = float(payload.get("threshold", self.threshold))
-            interval = float(payload.get("interval", self.interval))
-            no_detection_seconds = float(payload.get("no_detection_seconds", self.no_detection_seconds))
-            recording_enabled = payload.get("recording_enabled", self.recording_enabled)
-            if not 0.05 <= threshold <= 0.99:
-                raise ValueError("Le seuil doit être compris entre 0,05 et 0,99.")
-            if not 0.2 <= interval <= 30:
-                raise ValueError("La cadence doit être comprise entre 0,2 et 30 secondes.")
-            if not 0 <= no_detection_seconds <= 3600:
-                raise ValueError("Le délai doit être compris entre 0 et 3600 secondes.")
-            if not isinstance(recording_enabled, bool):
-                raise ValueError("Le réglage d'enregistrement doit être un booléen.")
             low_field = "low_resolution_url" if "low_resolution_url" in payload else "url"
-            low_url = self.low_resolution_url
+            clear_low = payload.get("clear_low_resolution_url", False)
+            clear_high = payload.get("clear_high_resolution_url", False)
+            if not isinstance(clear_low, bool) or not isinstance(clear_high, bool):
+                raise ValueError("Les commandes d'effacement des URL doivent être booléennes.")
             if low_field in payload:
                 low_url = validate_rtsp_url(payload[low_field], "Le flux basse résolution")
-            high_url = self.high_resolution_url
+                if low_url:
+                    candidate["low_resolution_url"] = low_url
             if "high_resolution_url" in payload:
                 high_url = validate_rtsp_url(payload["high_resolution_url"], "Le flux haute résolution")
-            candidate.update({
-                "low_resolution_url": low_url,
-                "high_resolution_url": high_url,
-                "threshold": threshold,
-                "interval": interval,
-                "no_detection_seconds": no_detection_seconds,
-                "recording_enabled": recording_enabled,
-            })
+                if high_url:
+                    candidate["high_resolution_url"] = high_url
+            if clear_low:
+                candidate["low_resolution_url"] = ""
+            if clear_high:
+                candidate["high_resolution_url"] = ""
+
+            for field in ("threshold", "interval", "no_detection_seconds"):
+                if field in payload:
+                    try:
+                        candidate[field] = float(payload[field])
+                    except (TypeError, ValueError) as exc:
+                        raise ValueError("Paramètres numériques invalides.") from exc
+            if "port" in payload:
+                try:
+                    candidate["port"] = int(payload["port"])
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("Le port doit être un nombre entier.") from exc
+            if "recording_enabled" in payload:
+                if not isinstance(payload["recording_enabled"], bool):
+                    raise ValueError("Le réglage d'enregistrement doit être un booléen.")
+                candidate["recording_enabled"] = payload["recording_enabled"]
+            for field in ("output_dir", "model", "labels", "host"):
+                if field in payload:
+                    candidate[field] = payload[field]
+            candidate = validate_config(candidate)
             if self.config_path is not None:
                 try:
                     save_config(self.config_path, candidate)
                 except OSError as exc:
                     raise ValueError("Impossible d'enregistrer la configuration locale.") from exc
+
+            low_url = candidate["low_resolution_url"]
+            high_url = candidate["high_resolution_url"]
             low_changed = low_url != self.low_resolution_url
             high_changed = high_url != self.high_resolution_url
             self.config = candidate
+            self.pending_restart_fields = {
+                field for field in ("model", "labels", "host", "port")
+                if candidate[field] != self.startup_config[field]
+            }
             self.low_resolution_url = low_url
             self.high_resolution_url = high_url
-            self.threshold = threshold
-            self.interval = interval
-            self.no_detection_seconds = no_detection_seconds
-            self.recording_enabled = recording_enabled
+            self.threshold = candidate["threshold"]
+            self.interval = candidate["interval"]
+            self.no_detection_seconds = candidate["no_detection_seconds"]
+            self.recording_enabled = candidate["recording_enabled"]
             self.output_dir = Path(candidate["output_dir"])
-            self.detector.threshold = threshold
+            self.detector.threshold = self.threshold
             if low_changed:
                 self.latest_frame = None
                 self.latest_detections = []
@@ -217,23 +243,13 @@ class Surveillance:
             if high_changed:
                 self.recording_reconnect_event.set()
                 self.recording_wakeup_event.set()
-            if not recording_enabled:
+            if not self.recording_enabled:
                 self.record_requested = False
                 self.recording_wakeup_event.set()
 
     def settings_snapshot(self) -> dict[str, Any]:
         with self.lock:
-            low_configured = bool(self.low_resolution_url)
-            high_configured = bool(self.high_resolution_url)
-            return {
-                "threshold": self.threshold,
-                "interval": self.interval,
-                "no_detection_seconds": self.no_detection_seconds,
-                "recording_enabled": self.recording_enabled,
-                "low_stream_configured": low_configured,
-                "high_stream_configured": high_configured,
-                "stream_configured": low_configured,
-            }
+            return self.settings_snapshot_unlocked()
 
     def status_snapshot(self) -> dict[str, Any]:
         with self.lock:
@@ -265,6 +281,18 @@ class Surveillance:
             "high_stream_configured": bool(self.high_resolution_url),
             "stream_configured": bool(self.low_resolution_url),
         }
+
+    def config_snapshot(self) -> dict[str, Any]:
+        """Return editable config values while redacting both RTSP URLs."""
+        with self.lock:
+            snapshot = {key: value for key, value in self.config.items()
+                        if key not in {"low_resolution_url", "high_resolution_url"}}
+            snapshot.update({
+                "low_stream_configured": bool(self.low_resolution_url),
+                "high_stream_configured": bool(self.high_resolution_url),
+                "restart_required_fields": sorted(self.pending_restart_fields),
+            })
+            return snapshot
 
     def preview_snapshot(self) -> tuple[int, bytes | None]:
         with self.lock:
@@ -487,11 +515,10 @@ class Surveillance:
                 with self.lock:
                     self.latest_detections = detections
                     self.last_inference = now
-                    if self.preview_enabled:
-                        ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 72])
-                        if ok:
-                            self.latest_jpeg = jpeg.tobytes()
-                            self.preview_sequence += 1
+                    ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 72])
+                    if ok:
+                        self.latest_jpeg = jpeg.tobytes()
+                        self.preview_sequence += 1
                     was_recording = self.record_requested
                     if detections and self.recording_enabled:
                         self.record_requested = True
@@ -507,23 +534,13 @@ class Surveillance:
                 logging.exception("Erreur pendant l'inférence TFLite")
             self.stop_event.wait(interval)
 
-    def run(self) -> None:
-        self.start()
-        try:
-            while not self.stop_event.wait(0.5):
-                pass
-        except KeyboardInterrupt:
-            logging.info("Arrêt demandé")
-        finally:
-            self.stop()
-
-
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Détection TFLite ciblée sur deux flux RTSP")
+    from app_version import APP_VERSION
+
+    parser = argparse.ArgumentParser(description="Application web de surveillance RTSP avec détection TFLite")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {APP_VERSION}")
     parser.add_argument("--config", type=Path, default=Path("surveillance.config.json"),
                         help="Fichier JSON local des flux et paramètres")
-    parser.add_argument("--mode", choices=("prod", "test"), default=None,
-                        help="prod: headless; test: aperçu web et réglages interactifs")
     parser.add_argument("--low-url", "--url", dest="low_url", default=None,
                         help="Remplace le flux basse résolution (détection)")
     parser.add_argument("--high-url", default=None,
@@ -534,13 +551,12 @@ def main() -> None:
     parser.add_argument("--interval", type=float, default=None)
     parser.add_argument("--no-detection-seconds", type=float, default=None)
     parser.add_argument("--output-dir", type=Path, default=None)
-    parser.add_argument("--host", default=None, help="Hôte du tableau en mode test")
-    parser.add_argument("--port", type=int, default=None, help="Port du tableau en mode test")
+    parser.add_argument("--host", default=None, help="Adresse d'écoute du serveur web")
+    parser.add_argument("--port", type=int, default=None, help="Port du serveur web")
     args = parser.parse_args()
     try:
         config = load_config(args.config)
         overrides = {
-            "mode": args.mode,
             "low_resolution_url": args.low_url,
             "high_resolution_url": args.high_url,
             "model": args.model,
@@ -557,25 +573,20 @@ def main() -> None:
         save_config(args.config, config)
     except (OSError, ValueError) as exc:
         parser.error(str(exc))
-    if config["mode"] == "prod" and (not config["low_resolution_url"] or not config["high_resolution_url"]):
-        parser.error("Le mode prod exige les deux URL RTSP dans le fichier JSON.")
+
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     cv2.setNumThreads(2)
     detector = TFLiteDetector(config["model"], config["labels"], config["threshold"])
     engine = Surveillance(
         config["low_resolution_url"], detector, config["threshold"], config["interval"],
         config["no_detection_seconds"], Path(config["output_dir"]),
-        recording_enabled=config["recording_enabled"], preview_enabled=config["mode"] == "test",
+        recording_enabled=config["recording_enabled"],
         high_resolution_url=config["high_resolution_url"], config_path=args.config, config_data=config,
     )
-    if config["mode"] == "prod":
-        engine.run()
-        return
-
     from surveillance_web import create_app
 
     engine.start()
-    logging.info("Mode test — tableau disponible sur http://%s:%d", config["host"], config["port"])
+    logging.info("Tableau de surveillance disponible sur http://%s:%d", config["host"], config["port"])
     try:
         create_app(engine).run(host=config["host"], port=config["port"], debug=False,
                               threaded=True, use_reloader=False)

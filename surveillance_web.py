@@ -1,8 +1,9 @@
-"""Local-only browser dashboard for surveillance test mode."""
+"""Web application routes for local RTSP surveillance."""
 from __future__ import annotations
 
 from typing import Any
 
+from app_version import APP_VERSION
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 
 
@@ -10,9 +11,29 @@ def create_app(engine: Any) -> Flask:
     app = Flask(__name__, template_folder="templates", static_folder="static")
     app.config["MAX_CONTENT_LENGTH"] = 8 * 1024
 
+    @app.context_processor
+    def inject_app_info() -> dict[str, str]:
+        return {"app_version": APP_VERSION}
+
     @app.get("/")
     def dashboard() -> str:
-        return render_template("surveillance_dashboard.html")
+        return render_template("surveillance_dashboard.html", active_page="home")
+
+    @app.get("/configuration")
+    def configuration() -> str:
+        return render_template("configuration.html", active_page="configuration")
+
+    @app.get("/help")
+    def help_page() -> str:
+        return render_template("help.html", active_page="help")
+
+    @app.get("/about")
+    def about_page() -> str:
+        return render_template("about.html", active_page="about")
+
+    @app.get("/api/config")
+    def get_config() -> Any:
+        return jsonify(engine.config_snapshot())
 
     @app.get("/api/state")
     def state() -> Any:
@@ -28,7 +49,7 @@ def create_app(engine: Any) -> Flask:
             engine.update_settings(payload)
         except (TypeError, ValueError) as exc:
             return jsonify(ok=False, error=str(exc)), 400
-        return jsonify(ok=True, settings=engine.settings_snapshot())
+        return jsonify(ok=True, settings=engine.settings_snapshot(), config=engine.config_snapshot())
 
     @app.get("/video_feed")
     def video_feed() -> Response:

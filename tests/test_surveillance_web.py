@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
+from app_version import APP_VERSION
 from surveillance import Detection, Surveillance, label_for_class, load_labels
 from surveillance_config import DEFAULT_CONFIG
 from surveillance_web import create_app
@@ -24,7 +25,6 @@ class SurveillanceDashboardTests(unittest.TestCase):
             0.5,
             10.0,
             Path("captures"),
-            preview_enabled=True,
         )
         self.client = create_app(self.engine).test_client()
 
@@ -35,10 +35,19 @@ class SurveillanceDashboardTests(unittest.TestCase):
         self.assertEqual(label_for_class(labels, 64), "bed")
         self.assertEqual(label_for_class(labels, 90), "")
 
-    def test_dashboard_renders(self):
-        response = self.client.get("/")
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Cam\xc3\xa9ra de surveillance", response.data)
+    def test_web_pages_and_navigation_render(self):
+        for route in ("/", "/configuration", "/help", "/about"):
+            response = self.client.get(route)
+            self.assertEqual(response.status_code, 200, route)
+            self.assertIn(b"Configuration", response.data)
+            self.assertIn(b"Aide", response.data)
+            self.assertIn(b"propos", response.data)
+        self.assertIn(b"Objets d\xc3\xa9tect\xc3\xa9s", self.client.get("/").data)
+        self.assertIn(APP_VERSION.encode(), self.client.get("/about").data)
+        self.assertNotIn(b"MODE TEST", self.client.get("/").data)
+
+    def test_default_configuration_has_no_operating_mode(self):
+        self.assertNotIn("mode", DEFAULT_CONFIG)
 
     def test_settings_update_without_restart(self):
         response = self.client.post("/api/config", json={
@@ -80,8 +89,11 @@ class SurveillanceDashboardTests(unittest.TestCase):
             })
             self.assertEqual(response.status_code, 200)
             body = client.get("/api/state").get_data(as_text=True)
+            config_body = client.get("/api/config").get_data(as_text=True)
             self.assertNotIn("192.0.2.20", body)
             self.assertNotIn("secret", body)
+            self.assertNotIn("192.0.2.20", config_body)
+            self.assertNotIn("secret", config_body)
             saved = json.loads(config_path.read_text(encoding="utf-8"))
             self.assertEqual(saved["low_resolution_url"], low_url)
             self.assertEqual(saved["high_resolution_url"], high_url)
@@ -89,6 +101,39 @@ class SurveillanceDashboardTests(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(config_path.stat().st_mode), 0o600)
             self.assertTrue(engine.settings_snapshot()["low_stream_configured"])
             self.assertTrue(engine.settings_snapshot()["high_stream_configured"])
+
+    def test_configuration_page_saves_all_json_parameters(self):
+        with TemporaryDirectory() as directory:
+            config_path = Path(directory) / "surveillance.json"
+            engine = Surveillance("rtsp://camera/low", SimpleNamespace(threshold=0.5),
+                                  0.5, 0.5, 10, Path("captures"),
+                                  high_resolution_url="rtsp://camera/high",
+                                  config_path=config_path, config_data=DEFAULT_CONFIG)
+            client = create_app(engine).test_client()
+            response = client.post("/api/config", json={
+                "threshold": 0.7,
+                "interval": 1.2,
+                "no_detection_seconds": 18,
+                "recording_enabled": False,
+                "output_dir": "event-clips",
+                "model": "models/custom.tflite",
+                "labels": "models/custom.txt",
+                "host": "127.0.0.1",
+                "port": 8123,
+            })
+            self.assertEqual(response.status_code, 200)
+            result = response.get_json()
+            self.assertEqual(result["config"]["output_dir"], "event-clips")
+            self.assertEqual(result["config"]["model"], "models/custom.tflite")
+            self.assertEqual(result["config"]["host"], "127.0.0.1")
+            self.assertEqual(result["config"]["port"], 8123)
+            self.assertEqual(result["config"]["restart_required_fields"], ["host", "labels", "model", "port"])
+            saved = json.loads(config_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["interval"], 1.2)
+            self.assertEqual(saved["output_dir"], "event-clips")
+            self.assertEqual(saved["port"], 8123)
+            self.assertNotIn("mode", saved)
+            self.assertEqual(engine.output_dir, Path("event-clips"))
 
     def test_rejects_non_rtsp_source(self):
         response = self.client.post("/api/config", json={"url": "https://example.invalid/camera"})
@@ -166,12 +211,12 @@ class SurveillanceDashboardTests(unittest.TestCase):
             self.assertTrue(writer.released)
             self.assertFalse(engine.recording_active)
 
-    def test_test_mode_encodes_preview_and_detection_state(self):
+    def test_inference_encodes_preview_and_detection_state(self):
         detector = SimpleNamespace(
             threshold=0.5,
             detect=lambda frame: [Detection("person", 0.91, (0.1, 0.2, 0.8, 0.7))],
         )
-        engine = Surveillance("", detector, 0.5, 0.2, 10.0, Path("captures"), preview_enabled=True)
+        engine = Surveillance("", detector, 0.5, 0.2, 10.0, Path("captures"))
         engine.latest_frame = np.zeros((48, 80, 3), dtype=np.uint8)
         worker = threading.Thread(target=engine.inference_loop, daemon=True)
         worker.start()

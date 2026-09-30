@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Aide · Fieldwatch{% endblock %}
+{% block page_class %}info-page help-page{% endblock %}
+{% block content %}
+<main class="workspace narrow-workspace">
+  <div class="page-heading"><div><p class="eyebrow">GUIDE D’UTILISATION</p><h1>Aide</h1><p class="lede">Premiers pas et fonctionnement de la surveillance.</p></div></div>
+  <section class="info-panel help-content">
+    <article><h2>1. Configurer les flux</h2><p>Ouvrez <a href="/configuration">Configuration</a> et renseignez les deux URL RTSP. Le flux basse résolution sert à l’analyse et à l’aperçu. Le flux haute résolution sert aux enregistrements événementiels. Enregistrez les paramètres pour les appliquer.</p></article>
+    <article><h2>2. Lire la page Détection</h2><p>La page principale affiche l’image de la caméra, les cadres et labels des objets trouvés sur la dernière image analysée, ainsi que l’état de connexion et d’enregistrement.</p></article>
+    <article><h2>3. Détections prises en charge</h2><p>Le modèle recherche les personnes, voitures, vélos, motos, chiens et chats. Ajustez le seuil de confiance et la cadence depuis Configuration.</p></article>
+    <article><h2>4. Enregistrements</h2><p>Lorsqu’une détection est présente et que l’enregistrement est activé, un clip MP4 est créé dans le dossier configuré. Le clip se termine après le délai choisi sans nouvelle détection.</p></article>
+    <article><h2>Redémarrage requis</h2><p>Les changements du modèle, des labels, de l’adresse ou du port du serveur sont sauvegardés immédiatement, mais nécessitent un redémarrage de l’application pour prendre effet. Les autres paramètres sont appliqués sans redémarrage.</p></article>
+    <article><h2>Confidentialité et accès</h2><p>Les URL RTSP, y compris les identifiants, sont stockées en clair dans le JSON local, protégé par les permissions du compte système. L’interface ne les restitue pas. Le serveur web n’a pas d’authentification : limitez son accès à un réseau de confiance et ne l’exposez pas directement à Internet.</p></article>
+  </section>
+</main>
+{% endblock %}
