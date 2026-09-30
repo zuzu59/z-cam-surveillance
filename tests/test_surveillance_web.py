@@ -43,7 +43,7 @@ class SurveillanceDashboardTests(unittest.TestCase):
             self.assertIn(b"Aide", response.data)
             self.assertIn(b"propos", response.data)
         self.assertIn(b"Objets d\xc3\xa9tect\xc3\xa9s", self.client.get("/").data)
-        self.assertEqual(APP_VERSION, "0.0.2")
+        self.assertEqual(APP_VERSION, "0.0.3")
         self.assertIn(APP_VERSION.encode(), self.client.get("/about").data)
         self.assertNotIn(b"MODE TEST", self.client.get("/").data)
 
@@ -227,12 +227,20 @@ class SurveillanceDashboardTests(unittest.TestCase):
             capture_urls = []
             writer = Writer()
             with patch("surveillance.cv2.VideoCapture", side_effect=HighResolutionCapture), \
-                    patch("surveillance.cv2.VideoWriter", return_value=writer) as writer_factory:
+                    patch("surveillance.cv2.VideoWriter", return_value=writer) as writer_factory, \
+                    patch.object(engine, "_finalize_recording") as finalize_recording:
                 engine.recording_loop()
+                engine.media_transcoder.shutdown(wait=True)
             self.assertEqual(capture_urls, ["rtsp://camera/high"])
             self.assertEqual(writer_factory.call_args.args[3], (1280, 720))
             self.assertEqual(writer.written, 3)
             self.assertTrue(writer.released)
+            finalize_recording.assert_called_once()
+            raw_path, published_path = finalize_recording.call_args.args
+            self.assertTrue(raw_path.name.startswith("."))
+            self.assertTrue(raw_path.name.endswith(".recording.mp4"))
+            self.assertFalse(published_path.name.startswith("."))
+            self.assertEqual(published_path.suffix, ".mp4")
             self.assertFalse(engine.recording_active)
 
     def test_inference_encodes_preview_and_detection_state(self):

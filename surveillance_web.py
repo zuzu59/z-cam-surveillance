@@ -1,10 +1,13 @@
 """Web application routes for local RTSP surveillance."""
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Any
 
 from app_version import APP_VERSION
-from flask import Flask, Response, jsonify, render_template, request, stream_with_context
+from flask import Flask, Response, abort, jsonify, render_template, request, send_file, stream_with_context
+from surveillance_recordings import list_recordings, recording_details, recordings_directory, resolve_recording
 
 
 def create_app(engine: Any) -> Flask:
@@ -30,6 +33,67 @@ def create_app(engine: Any) -> Flask:
     @app.get("/about")
     def about_page() -> str:
         return render_template("about.html", active_page="about")
+
+    @app.get("/recordings")
+    def recordings_page() -> str:
+        return render_template("recordings.html", active_page="recordings")
+
+    def configured_recordings_directory() -> Path:
+        lock = getattr(engine, "lock", None)
+        if lock is None:
+            output_dir = engine.output_dir
+        else:
+            with lock:
+                output_dir = engine.output_dir
+        return recordings_directory(output_dir)
+
+    @app.get("/api/recordings")
+    def recordings_index() -> Any:
+        query = request.args.get("q", "")
+        if len(query) > 160:
+            return jsonify(ok=False, error="Le filtre est trop long."), 400
+        try:
+            page = int(request.args.get("page", "0"))
+            if page < 0:
+                raise ValueError
+            directory = configured_recordings_directory()
+            result = list_recordings(directory, query, page)
+            result["directory_label"] = directory.name or "Enregistrements"
+        except (OSError, ValueError):
+            return jsonify(ok=False, error="Impossible de lire le dossier des enregistrements."), 400
+        return jsonify(result)
+
+    @app.get("/api/recordings/<path:filename>")
+    def recording_info(filename: str) -> Any:
+        details = recording_details(configured_recordings_directory(), filename)
+        if details is None:
+            abort(404)
+        return jsonify(details)
+
+    @app.get("/api/recordings/<path:filename>/video")
+    def recording_video(filename: str) -> Response:
+        path = resolve_recording(configured_recordings_directory(), filename)
+        if path is None:
+            abort(404)
+        return send_file(path, mimetype="video/mp4", as_attachment=False,
+                         download_name=path.name, conditional=True, max_age=0)
+
+    @app.delete("/api/recordings/<path:filename>")
+    def delete_recording(filename: str) -> Any:
+        if request.headers.get("X-Requested-With") != "XMLHttpRequest":
+            return jsonify(ok=False, error="Demande de suppression invalide."), 403
+        path = resolve_recording(configured_recordings_directory(), filename)
+        if path is None:
+            abort(404)
+        archive_path = path.parent / ".originals" / path.name
+        try:
+            has_archived_original = archive_path.is_file() and os.path.samefile(path, archive_path)
+            path.unlink()
+            if has_archived_original:
+                archive_path.unlink(missing_ok=True)
+        except OSError:
+            return jsonify(ok=False, error="Impossible de supprimer toutes les versions du fichier."), 500
+        return jsonify(ok=True, name=path.name)
 
     @app.get("/api/config")
     def get_config() -> Any:

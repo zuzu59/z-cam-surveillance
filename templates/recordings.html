@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Enregistrements · z-cam-surveillance{% endblock %}
+{% block page_class %}recordings-page{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='recordings.css') }}">{% endblock %}
+{% block content %}
+<main class="workspace recordings-workspace">
+  <div class="page-heading recordings-heading">
+    <div><p class="eyebrow">ARCHIVES VIDÉO</p><h1>Enregistrements</h1><p class="lede">Parcourez, recherchez et lisez les clips MP4 enregistrés par la surveillance.</p></div>
+    <span class="recording-folder" id="recording-folder">Dossier configuré</span>
+  </div>
+
+  <section class="recording-layout" aria-label="Bibliothèque des enregistrements">
+    <aside class="recording-library" aria-labelledby="library-title">
+      <div class="library-heading"><div><h2 id="library-title">Bibliothèque</h2><p id="library-count">Chargement des fichiers…</p></div><span class="library-icon" aria-hidden="true">MP4</span></div>
+      <label class="sr-only" for="recording-search">Rechercher un enregistrement par nom ou date</label>
+      <div class="search-control"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg><input id="recording-search" type="search" autocomplete="off" placeholder="Filtrer par nom ou date…"><kbd>/</kbd></div>
+      <div class="list-message" id="list-message" role="status" aria-live="polite">Lecture du dossier…</div>
+      <div class="recording-list" id="recording-list" role="listbox" aria-label="Fichiers MP4" aria-busy="true"></div>
+      <nav class="list-pagination" aria-label="Pages des enregistrements">
+        <button class="pagination-button" id="previous-page" type="button" aria-label="Page précédente" disabled><span aria-hidden="true">←</span><span>Précédent</span></button>
+        <span class="page-indicator" id="page-indicator">—</span>
+        <button class="pagination-button" id="next-page" type="button" aria-label="Page suivante" disabled><span>Suivant</span><span aria-hidden="true">→</span></button>
+      </nav>
+    </aside>
+
+    <section class="recording-viewer" aria-label="Lecteur vidéo">
+      <div class="viewer-heading">
+        <div class="selected-file-heading"><span class="file-type-icon" aria-hidden="true">▶</span><div><h2 id="selected-name">Sélectionnez un enregistrement</h2><p id="selected-subtitle">Choisissez un fichier dans la bibliothèque.</p></div></div>
+        <button class="delete-trigger" id="delete-trigger" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M5 7l1 14h12l1-14M9 7V4h6v3"/></svg><span>Supprimer</span></button>
+      </div>
+
+      <div class="player-stage" id="player-stage">
+        <video id="recording-player" controls preload="metadata" playsinline hidden aria-label="Lecture de l’enregistrement sélectionné"></video>
+        <div class="player-empty" id="player-empty"><span class="empty-play" aria-hidden="true">▶</span><strong>Aucun fichier sélectionné</strong><span>Choisissez un clip dans la liste pour le lire.</span></div>
+      </div>
+
+      <div class="playback-toolbar" aria-label="Commandes de lecture">
+        <div class="file-navigation" role="group" aria-label="Naviguer entre les fichiers">
+          <button class="transport-button" id="previous-file" type="button" aria-label="Fichier précédent" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14M19 6l-10 6 10 6z"/></svg><span>Précédent</span></button>
+          <button class="transport-button" id="next-file" type="button" aria-label="Fichier suivant" disabled><span>Suivant</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14M5 6l10 6-10 6z"/></svg></button>
+        </div>
+        <div class="speed-control"><span>Vitesse</span><div class="speed-options" role="group" aria-label="Vitesse de lecture">
+          <button type="button" data-speed="1" aria-pressed="true">1×</button><button type="button" data-speed="1.5" aria-pressed="false">1,5×</button><button type="button" data-speed="2" aria-pressed="false">2×</button>
+        </div></div>
+      </div>
+
+      <div class="delete-confirmation" id="delete-confirmation" role="alertdialog" aria-labelledby="delete-title" aria-describedby="delete-description" hidden>
+        <div><strong id="delete-title">Supprimer définitivement ce fichier ?</strong><p id="delete-description">Cette action ne peut pas être annulée.</p></div>
+        <div class="confirmation-actions"><button id="cancel-delete" type="button">Annuler</button><button class="confirm-delete" id="confirm-delete" type="button">Supprimer le fichier</button></div>
+      </div>
+
+      <section class="file-details" aria-labelledby="details-title">
+        <div class="details-heading"><h3 id="details-title">Détails du fichier</h3><span id="details-state">En attente d’une sélection</span></div>
+        <dl class="details-grid" id="details-grid">
+          <div><dt>Nom</dt><dd id="detail-name">—</dd></div>
+          <div><dt>Taille</dt><dd id="detail-size">—</dd></div>
+          <div><dt>Date de modification</dt><dd id="detail-date">—</dd></div>
+          <div><dt>Durée</dt><dd id="detail-duration">—</dd></div>
+          <div><dt>Résolution</dt><dd id="detail-resolution">—</dd></div>
+          <div><dt>Codec vidéo</dt><dd id="detail-codec">—</dd></div>
+          <div><dt>Images par seconde</dt><dd id="detail-frame-rate">—</dd></div>
+          <div><dt>Débit vidéo</dt><dd id="detail-bitrate">—</dd></div>
+        </dl>
+        <p class="viewer-feedback" id="viewer-feedback" role="status" aria-live="polite"></p>
+      </section>
+    </section>
+  </section>
+  <footer class="page-footer"><span>Les clips restent dans le dossier d’enregistrement configuré.</span><span>La suppression est définitive.</span></footer>
+</main>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='recordings.js') }}" defer></script>{% endblock %}

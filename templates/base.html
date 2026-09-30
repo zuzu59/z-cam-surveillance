@@ -16,6 +16,7 @@
     </a>
     <nav class="main-nav" aria-label="Navigation principale">
       <a href="/" {% if active_page == 'home' %}aria-current="page"{% endif %}>Détection</a>
+      <a href="/recordings" {% if active_page == 'recordings' %}aria-current="page"{% endif %}>Enregistrements</a>
       <a href="/configuration" {% if active_page == 'configuration' %}aria-current="page"{% endif %}>Configuration</a>
       <a href="/help" {% if active_page == 'help' %}aria-current="page"{% endif %}>Aide</a>
       <a href="/about" {% if active_page == 'about' %}aria-current="page"{% endif %}>À propos</a>

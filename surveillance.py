@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 import threading
+from concurrent.futures import ThreadPoolExecutor
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -14,6 +15,7 @@ from typing import Any
 import cv2
 import numpy as np
 
+from surveillance_media import transcode_mp4_to_h264
 from surveillance_config import (
     DEFAULT_CONFIG,
     load_config,
@@ -170,6 +172,7 @@ class Surveillance:
         self.capture_thread: threading.Thread | None = None
         self.inference_thread: threading.Thread | None = None
         self.recording_thread: threading.Thread | None = None
+        self.media_transcoder = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mp4-h264-transcode")
 
     def update_settings(self, payload: dict[str, Any]) -> None:
         """Validate and persist the full JSON configuration without exposing RTSP URLs."""
@@ -307,6 +310,21 @@ class Surveillance:
         with self.lock:
             return self.preview_sequence, self.latest_jpeg
 
+    def _finalize_recording(self, source: Path, destination: Path) -> None:
+        if transcode_mp4_to_h264(source, destination):
+            try:
+                source.unlink(missing_ok=True)
+            except OSError:
+                logging.warning("MP4 H.264 créé, mais le fichier temporaire n’a pas pu être supprimé")
+            logging.info("Enregistrement prêt pour les navigateurs (H.264): %s", destination.name)
+            return
+        try:
+            if source.is_file():
+                source.replace(destination)
+                logging.error("Conversion H.264 indisponible; clip publié dans son codec source: %s", destination.name)
+        except OSError:
+            logging.exception("Impossible de finaliser le clip MP4")
+
     def start(self) -> None:
         if self.started:
             return
@@ -326,6 +344,7 @@ class Surveillance:
         for worker in (self.capture_thread, self.inference_thread, self.recording_thread):
             if worker:
                 worker.join(timeout=7)
+        self.media_transcoder.shutdown(wait=False, cancel_futures=False)
         self.started = False
 
     def capture_loop(self) -> None:
@@ -393,17 +412,20 @@ class Surveillance:
         writer: Any = None
         writer_path: Path | None = None
         writer_frames = 0
+        published_path: Path | None = None
         last_size: tuple[int, int] | None = None
         reconnect_delay = 1.0
         warned_missing_source = False
 
         def close_writer() -> None:
-            nonlocal writer, writer_path, writer_frames, last_size
+            nonlocal writer, writer_path, writer_frames, published_path, last_size
             current_writer = writer
             current_path = writer_path
+            current_published_path = published_path
             current_frames = writer_frames
             writer = None
             writer_path = None
+            published_path = None
             writer_frames = 0
             last_size = None
             if current_writer is not None:
@@ -413,6 +435,13 @@ class Surveillance:
                     current_path.unlink(missing_ok=True)
                 except OSError:
                     logging.warning("Impossible de supprimer le MP4 vide")
+            elif current_frames > 0 and current_path is not None and current_published_path is not None:
+                try:
+                    self.media_transcoder.submit(
+                        self._finalize_recording, current_path, current_published_path
+                    )
+                except RuntimeError:
+                    self._finalize_recording(current_path, current_published_path)
             with self.lock:
                 self.recording_active = False
 
@@ -489,8 +518,9 @@ class Surveillance:
                     self.output_dir.mkdir(parents=True, exist_ok=True)
                     filename = self.output_dir / f"{datetime.now():%Y%m%d_%H%M%S_%f}.mp4"
                     fps = capture.get(cv2.CAP_PROP_FPS)
-                    writer_path = filename
-                    writer = cv2.VideoWriter(str(filename), cv2.VideoWriter_fourcc(*"mp4v"),
+                    writer_path = filename.with_name(f".{filename.stem}.recording.mp4")
+                    published_path = filename
+                    writer = cv2.VideoWriter(str(writer_path), cv2.VideoWriter_fourcc(*"mp4v"),
                                              fps if fps and fps > 0 else 10.0, (width, height))
                     if not writer.isOpened():
                         logging.error("Impossible de créer le MP4 haute résolution (%dx%d)", width, height)

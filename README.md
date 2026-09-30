@@ -6,9 +6,21 @@ Application web locale de surveillance RTSP et détection d’objets. Elle analy
 
 - **Détection** (`/`) : aperçu caméra, cadres, labels et état des flux/enregistrements.
 - **Configuration** (`/configuration`) : formulaire unique pour modifier l’ensemble des paramètres persistés.
-- **Aide** (`/help`) et **À propos** (`/about`). La version est `0.0.2`; elle ne s’incrémente pas automatiquement et n’est incrémentée que sur demande du propriétaire.
+- **Enregistrements** (`/recordings`) : recherche instantanée dans les clips MP4, lecteur avec navigation et vitesses 1×/1,5×/2×, détails des fichiers et suppression confirmée.
+- **Aide** (`/help`) et **À propos** (`/about`). La version est `0.0.3`; elle ne s’incrémente pas automatiquement et n’est incrémentée que sur demande du propriétaire.
 
-Le modèle SSD MobileNet V2 COCO quantifié inclus dans `models/` détecte `person`, `car`, `bicycle`, `motorcycle`, `dog` et `cat`. Le flux basse résolution alimente la capture et l’inférence (0,5 seconde entre les analyses par défaut). Lorsqu’une détection est présente, le moteur ouvre le flux haute résolution et enregistre celui-ci en MP4 dans `captures/`; il ferme le clip après 10 secondes sans détection et ferme le flux haute résolution en dehors des événements. Aucun affichage OpenCV n’est utilisé.
+La bibliothèque **Enregistrements** parcourt uniquement les fichiers MP4 du dossier de sortie configuré; sa recherche filtre les noms et dates sur toutes les pages. Les métadonnées techniques (durée, résolution, codec, cadence et débit) sont lues à la demande avec `ffprobe` lorsqu’il est disponible. L’API ne révèle jamais le chemin absolu du dossier; la lecture supporte les requêtes HTTP Range du navigateur. La suppression demande une confirmation et efface définitivement le clip sélectionné.
+
+Le modèle SSD MobileNet V2 COCO quantifié inclus dans `models/` détecte `person`, `car`, `bicycle`, `motorcycle`, `dog` et `cat`. Le flux basse résolution alimente la capture et l’inférence (0,5 seconde entre les analyses par défaut). Lorsqu’une détection est présente, le moteur ouvre le flux haute résolution et enregistre celui-ci en MP4 H.264 (`yuv420p`) dans `captures/`; il ferme le clip après 10 secondes sans détection et ferme le flux haute résolution en dehors des événements. L’encodage finalisé est publié après conversion FFmpeg pour être lisible par les navigateurs. Aucun affichage OpenCV n’est utilisé.
+
+Les anciens clips encodés en MPEG-4 Part 2 (`mp4v`) ne sont pas décodés par tous les navigateurs. Pour les convertir, commencez par vérifier le bilan, puis exécutez la conversion atomique :
+
+```bash
+.venv/bin/python transcode_recordings.py --directory captures
+.venv/bin/python transcode_recordings.py --directory captures --apply
+```
+
+Les fichiers valides sont convertis de façon atomique et leurs originaux sont archivés dans le sous-dossier masqué `captures/.originals/`; les fichiers illisibles sont conservés et ignorés. L’archive est exclue de la bibliothèque vidéo; une suppression depuis l’interface supprime également la sauvegarde liée au clip choisi.
 
 Le modèle provient de [google-coral/test_data](https://github.com/google-coral/test_data). SHA-256 : `42fb3d70ffb7bb37dd518f730f7be784b831c2078f30c497d0019cc2e987fa26`. Vérification optionnelle :
 
@@ -22,13 +34,13 @@ Python 3.10 ou plus récent. Depuis la racine du dépôt :
 
 ```bash
 sudo apt update
-sudo apt install -y python3-venv python3-pip libopenjp2-7 libavcodec-extra
+sudo apt install -y python3-venv python3-pip libopenjp2-7 libavcodec-extra ffmpeg
 python3 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install -r requirements.txt
 ```
 
-Dépendances : LiteRT (`ai-edge-litert`), NumPy, Flask et `opencv-python-headless`. Pas besoin de TensorFlow complet ni d’OpenCV avec interface graphique.
+Dépendances : LiteRT (`ai-edge-litert`), NumPy, Flask et `opencv-python-headless`. FFmpeg avec `libx264`/`ffprobe` (fourni par le paquet système `ffmpeg`) est nécessaire pour publier les clips en H.264 lisible par les navigateurs. Pas besoin de TensorFlow complet ni d’OpenCV avec interface graphique.
 
 ## Lancement
 
