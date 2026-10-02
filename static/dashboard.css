@@ -54,7 +54,8 @@ h1 { margin-bottom: 5px; font-size: 26px; line-height: 1.2; letter-spacing: -.03
 .sample-chip { display: flex; align-items: center; gap: 7px; color: #c1cbd2; font-size: 11px; white-space: nowrap; }
 .pulse-dot { width: 6px; height: 6px; }
 .video-stage { position: relative; display: grid; min-height: 260px; aspect-ratio: 16/9; place-items: center; overflow: hidden; background: #070a0d; border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); }
-#preview-image { display: block; width: 100%; height: 100%; max-height: min(68vh, 660px); object-fit: contain; }
+.camera-frame { position: absolute; inset: 0; display: grid; place-items: center; overflow: hidden; pointer-events: none; }
+#preview-image { display: block; width: auto; height: auto; min-width: 0; min-height: 0; max-width: 100%; max-height: 100%; object-fit: contain; }
 .empty-state { position: absolute; inset: 0; display: grid; align-content: center; justify-items: center; gap: 9px; padding: 24px; color: var(--muted); text-align: center; }
 .empty-state strong { color: #dce4e9; font-size: 13px; font-weight: 600; }
 .empty-state > span:last-child { max-width: 310px; font-size: 11px; line-height: 1.5; }
@@ -234,7 +235,6 @@ input[type="range"]:focus-visible { outline: 2px solid #9bcdf5; outline-offset: 
   .dashboard-page .main-column { min-height: 0; grid-template-rows: minmax(0, 1fr) auto; gap: 12px; }
   .dashboard-page .preview-panel { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
   .dashboard-page .video-stage { min-height: 0; aspect-ratio: auto; }
-  .dashboard-page #preview-image { max-height: 100%; }
   .dashboard-page .detections-panel { min-height: 0; max-height: clamp(126px, 22dvh, 190px); overflow: auto; }
   .dashboard-page .overview-panel { min-height: 0; overflow: auto; }
   .dashboard-page .page-footer { flex: none; padding-top: 12px; }

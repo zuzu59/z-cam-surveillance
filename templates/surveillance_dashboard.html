@@ -17,8 +17,10 @@
         </div>
         <div class="video-stage" id="video-stage">
           <div class="empty-state" id="empty-state"><span class="empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 7.5h3l1.7-2h8.6l1.7 2h3v11H3z"/><circle cx="12" cy="13" r="4"/></svg></span><strong>En attente du flux vidéo</strong><span>Configurez le flux basse résolution pour commencer l’analyse.</span></div>
-          <img id="preview-image" src="/video_feed" alt="Aperçu direct de la caméra avec les détections" hidden>
-          <svg id="detection-overlay" class="detection-overlay" viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true"></svg>
+          <div class="camera-frame" id="camera-frame">
+            <img id="preview-image" src="/video_feed" alt="Aperçu direct de la caméra avec les détections" hidden>
+            <svg id="detection-overlay" class="detection-overlay" viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true"></svg>
+          </div>
           <div class="video-hud"><span><i class="hud-dot"></i> ANALYSE</span><span id="frame-label">—</span></div>
         </div>
         <div class="preview-footer"><span><span class="legend-box"></span> Objets encadrés dans la dernière image analysée</span><span id="sample-rate">—</span></div>

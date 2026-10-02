@@ -4,6 +4,29 @@
   let newestSequence = -1;
 
   const percent = (value) => `${Math.round(Number(value) * 100)} %`;
+  const alignDetectionOverlay = () => {
+    const image = $("preview-image");
+    const frame = $("camera-frame");
+    if (image.hidden) return;
+    const imageRect = image.getBoundingClientRect();
+    if (!imageRect.width || !imageRect.height) return;
+    const frameRect = frame.getBoundingClientRect();
+    Object.assign($("detection-overlay").style, {
+      left: `${imageRect.left - frameRect.left}px`,
+      top: `${imageRect.top - frameRect.top}px`,
+      right: "auto",
+      bottom: "auto",
+      width: `${imageRect.width}px`,
+      height: `${imageRect.height}px`,
+    });
+  };
+  if ("ResizeObserver" in window) {
+    const frameObserver = new ResizeObserver(alignDetectionOverlay);
+    frameObserver.observe($("camera-frame"));
+    frameObserver.observe($("preview-image"));
+  } else {
+    window.addEventListener("resize", alignDetectionOverlay);
+  }
   const setConnection = (connected, configured) => {
     const pill = $("connection-pill");
     pill.classList.toggle("connected", connected);
@@ -80,6 +103,7 @@
         if (newestSequence > 0) {
           $("preview-image").hidden = false;
           $("empty-state").hidden = true;
+          requestAnimationFrame(alignDetectionOverlay);
           const resolution = state.width && state.height ? `${state.width} × ${state.height}` : "Image analysée";
           $("preview-meta").textContent = `${resolution} · aperçu actualisé à chaque analyse`;
           $("frame-label").textContent = resolution;
