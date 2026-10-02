@@ -43,6 +43,9 @@ class SurveillanceDashboardTests(unittest.TestCase):
             self.assertIn(b"Aide", response.data)
             self.assertIn(b"propos", response.data)
         self.assertIn(b"Objets d\xc3\xa9tect\xc3\xa9s", self.client.get("/").data)
+        config_page = self.client.get("/configuration").get_data(as_text=True)
+        self.assertIn('form="config-form"', config_page)
+        self.assertIn("Sauvegarder et recharger", config_page)
         self.assertEqual(APP_VERSION, "0.0.3")
         self.assertIn(APP_VERSION.encode(), self.client.get("/about").data)
         self.assertNotIn(b"MODE TEST", self.client.get("/").data)
@@ -61,6 +64,27 @@ class SurveillanceDashboardTests(unittest.TestCase):
         self.assertEqual(self.engine.detector.threshold, 0.65)
         self.assertEqual(self.engine.settings_snapshot()["interval"], 0.7)
         self.assertFalse(self.engine.settings_snapshot()["recording_enabled"])
+
+    def test_recording_frame_count_tracks_wall_clock_not_decode_rate(self):
+        self.assertEqual(self.engine._wall_clock_frame_target(4.0, 25.0), 100)
+        self.assertEqual(self.engine._wall_clock_frame_target(10.0, 25.0), 250)
+        self.assertEqual(self.engine._wall_clock_frame_target(0.0, 25.0), 1)
+        self.assertEqual(self.engine._wall_clock_frame_target(10.0, 0.0), 1)
+
+    def test_timeout_uses_updated_value_in_the_recording_decision(self):
+        self.engine.recording_enabled = True
+        self.engine.record_requested = True
+        self.engine.no_detection_seconds = 12.0
+        self.engine.last_detection = 100.0
+        self.assertTrue(self.engine._should_record_unlocked(now=104.0))
+
+        self.engine.update_settings({"no_detection_seconds": 4.0})
+        self.assertFalse(self.engine._should_record_unlocked(now=104.0))
+        self.assertFalse(self.engine.record_requested)
+
+        self.engine.no_detection_seconds = 0.0
+        self.engine.record_requested = True
+        self.assertTrue(self.engine._should_record_unlocked(now=10_000.0))
 
     def test_rejects_bad_config_without_partial_update(self):
         response = self.client.post("/api/config", json={
@@ -134,17 +158,22 @@ class SurveillanceDashboardTests(unittest.TestCase):
                                   high_resolution_url="rtsp://camera/high",
                                   config_path=config_path, config_data=DEFAULT_CONFIG)
             client = create_app(engine).test_client()
-            response = client.post("/api/config", json={
-                "threshold": 0.7,
-                "interval": 1.2,
-                "no_detection_seconds": 18,
-                "recording_enabled": False,
-                "output_dir": "event-clips",
-                "model": "models/custom.tflite",
-                "labels": "models/custom.txt",
-                "host": "127.0.0.1",
-                "port": 8123,
-            })
+            with patch("surveillance_web._schedule_application_restart") as schedule_restart:
+                response = client.post("/api/config", json={
+                    "low_resolution_url": "rtsp://camera/low",
+                    "high_resolution_url": "rtsp://camera/high",
+                    "threshold": 0.7,
+                    "interval": 1.2,
+                    "no_detection_seconds": 18,
+                    "recording_enabled": False,
+                    "output_dir": "event-clips",
+                    "model": "models/custom.tflite",
+                    "labels": "models/custom.txt",
+                    "host": "127.0.0.1",
+                    "port": 8123,
+                    "restart_application": True,
+                })
+                schedule_restart.assert_called_once()
             self.assertEqual(response.status_code, 200)
             result = response.get_json()
             self.assertEqual(result["config"]["output_dir"], "event-clips")
@@ -152,8 +181,18 @@ class SurveillanceDashboardTests(unittest.TestCase):
             self.assertEqual(result["config"]["host"], "127.0.0.1")
             self.assertEqual(result["config"]["port"], 8123)
             self.assertEqual(result["config"]["restart_required_fields"], ["host", "labels", "model", "port"])
+            self.assertTrue(result["restart_scheduled"])
+            status = client.get("/api/state").get_json()
+            self.assertEqual(result["server_pid"], status["server_pid"])
+            self.assertEqual(result["server_instance_id"], status["server_instance_id"])
             saved = json.loads(config_path.read_text(encoding="utf-8"))
+            self.assertEqual(set(saved), set(DEFAULT_CONFIG))
+            self.assertEqual(saved["low_resolution_url"], "rtsp://camera/low")
+            self.assertEqual(saved["high_resolution_url"], "rtsp://camera/high")
+            self.assertEqual(saved["threshold"], 0.7)
             self.assertEqual(saved["interval"], 1.2)
+            self.assertEqual(saved["no_detection_seconds"], 18)
+            self.assertFalse(saved["recording_enabled"])
             self.assertEqual(saved["output_dir"], "event-clips")
             self.assertEqual(saved["port"], 8123)
             self.assertNotIn("mode", saved)
@@ -185,7 +224,8 @@ class SurveillanceDashboardTests(unittest.TestCase):
             engine = Surveillance("rtsp://camera/low", SimpleNamespace(threshold=0.5),
                                   0.5, 0.5, 10, Path(output), high_resolution_url="rtsp://camera/high")
             engine.record_requested = True
-            engine.last_detection = time.monotonic()
+            clock = [100.0]
+            engine.last_detection = clock[0]
             frames = []
 
             class HighResolutionCapture:
@@ -199,6 +239,7 @@ class SurveillanceDashboardTests(unittest.TestCase):
 
                 def read(self):
                     self.read_count += 1
+                    clock[0] += 0.2  # Simulate a decoder slower than the advertised 15 FPS.
                     frames.append(np.zeros((720, 1280, 3), dtype=np.uint8))
                     if self.read_count == 3:
                         engine.stop_event.set()
@@ -226,14 +267,15 @@ class SurveillanceDashboardTests(unittest.TestCase):
 
             capture_urls = []
             writer = Writer()
-            with patch("surveillance.cv2.VideoCapture", side_effect=HighResolutionCapture), \
+            with patch("surveillance.time.monotonic", side_effect=lambda: clock[0]), \
+                    patch("surveillance.cv2.VideoCapture", side_effect=HighResolutionCapture), \
                     patch("surveillance.cv2.VideoWriter", return_value=writer) as writer_factory, \
                     patch.object(engine, "_finalize_recording") as finalize_recording:
                 engine.recording_loop()
                 engine.media_transcoder.shutdown(wait=True)
             self.assertEqual(capture_urls, ["rtsp://camera/high"])
             self.assertEqual(writer_factory.call_args.args[3], (1280, 720))
-            self.assertEqual(writer.written, 3)
+            self.assertEqual(writer.written, 6)
             self.assertTrue(writer.released)
             finalize_recording.assert_called_once()
             raw_path, published_path = finalize_recording.call_args.args

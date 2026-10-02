@@ -215,3 +215,31 @@ input[type="range"]:focus-visible { outline: 2px solid #9bcdf5; outline-offset: 
 .secret-toggle:focus-visible { outline: 2px solid #69b78d; outline-offset: -3px; }
 .secret-toggle:disabled { color: #57636c; cursor: not-allowed; }
 .secret-toggle svg { width: 18px; height: 18px; overflow: visible; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+
+.configuration-page .config-page-heading { align-items: center; }
+.config-page-heading .apply-button { width: auto; min-width: 210px; flex: none; padding: 0 16px; }
+
+@media (min-width: 1100px) and (min-height: 560px) {
+  .dashboard-page .workspace {
+    display: flex;
+    height: calc(100dvh - 68px);
+    min-height: 0;
+    flex-direction: column;
+    padding-top: clamp(16px, 3dvh, 28px);
+    padding-bottom: 12px;
+  }
+
+  .dashboard-page .page-heading { flex: none; margin-bottom: 14px; }
+  .dashboard-page .dashboard-grid { flex: 1; min-height: 0; align-items: stretch; }
+  .dashboard-page .main-column { min-height: 0; grid-template-rows: minmax(0, 1fr) auto; gap: 12px; }
+  .dashboard-page .preview-panel { min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+  .dashboard-page .video-stage { min-height: 0; aspect-ratio: auto; }
+  .dashboard-page #preview-image { max-height: 100%; }
+  .dashboard-page .detections-panel { min-height: 0; max-height: clamp(126px, 22dvh, 190px); overflow: auto; }
+  .dashboard-page .overview-panel { min-height: 0; overflow: auto; }
+  .dashboard-page .page-footer { flex: none; padding-top: 12px; }
+}
+
+@media (max-width: 560px) {
+  .config-page-heading .apply-button { width: 100%; min-width: 0; }
+}

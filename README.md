@@ -48,15 +48,15 @@ Dépendances : LiteRT (`ai-edge-litert`), NumPy, Flask et `opencv-python-headles
 ./start.sh
 ```
 
-Le script démarre toujours l’application web, en utilisant le fichier JSON local. Arrêtez avec `Ctrl+C`. La version peut être affichée avec `./start.sh --version`.
+`./start.sh` est l’unique commande de démarrage/redémarrage : elle recherche le processus qui utilise le fichier de configuration de ce dépôt, l’arrête proprement si nécessaire, puis lance l’application. Utilisez-la aussi après une modification manuelle du JSON. Dans un terminal interactif, `Ctrl+C` arrête le serveur. La version peut être affichée avec `./start.sh --version` sans interrompre une instance en cours.
 
 Par défaut, le serveur écoute sur `0.0.0.0:8091`. Ouvrez `http://<adresse-du-serveur>:8091/`. L’application n’a pas d’authentification : gardez-la sur un réseau de confiance, restreignez l’accès par pare-feu et ne l’exposez pas directement à Internet.
 
 ## Configuration persistante
 
-Au premier lancement, l’application crée `surveillance.config.json` à partir des valeurs par défaut (également documentées dans `surveillance.config.example.json`). La page **Configuration** permet de modifier en une fois toutes les valeurs de ce JSON : URL RTSP basse et haute résolution, seuil, cadence, délai avant fermeture du clip, activation de l’enregistrement, dossier de sortie, modèle, labels, adresse d’écoute et port.
+Au premier lancement, l’application crée `surveillance.config.json` à partir des valeurs par défaut (également documentées dans `surveillance.config.example.json`). La page **Configuration** permet de modifier en une fois les 11 paramètres de ce JSON : URL RTSP basse et haute résolution, seuil, cadence, délai sans détection avant fermeture du clip, activation de l’enregistrement, dossier de sortie, modèle, labels, adresse d’écoute et port. Le bouton **Sauvegarder et recharger**, en haut à droite, écrit le JSON complet puis redémarre automatiquement le processus : tous les paramètres sont relus depuis le fichier, y compris le modèle, les labels, l’adresse et le port. La page se reconnecte ensuite au serveur redémarré. Les MP4 conservent une durée cohérente avec le temps réel, même si le décodage du flux haute résolution est plus lent que sa cadence annoncée.
 
-Les paramètres modifiables à chaud sont appliqués immédiatement. Les changements de modèle, labels, adresse ou port sont sauvegardés et signalés dans la page, mais prennent effet au prochain redémarrage. Un champ URL laissé vide conserve la valeur mémorisée; une case dédiée permet d’effacer une URL.
+Les champs URL restent volontairement vides au chargement pour ne pas exposer les secrets; leur statut confirme si une valeur est mémorisée. Les laisser vides conserve les URL existantes; les cases dédiées permettent de les effacer. L’API et les journaux ne les affichent pas.
 
 `surveillance.config.json` est ignoré par Git et ses permissions sont limitées au propriétaire (`0600`). Il contient les identifiants RTSP **en clair sur le disque** : protégez l’accès au compte système et ne copiez/committez jamais ce fichier. Les réponses de configuration ordinaires masquent les URL; le bouton œil de la page Configuration demande explicitement l’affichage d’une seule URL à la fois. Le serveur n’a pas d’authentification : toute personne pouvant accéder à l’application peut révéler ces identifiants, réservez donc son accès à un réseau et à des appareils de confiance. Le fichier d’exemple ne contient aucun identifiant.
 

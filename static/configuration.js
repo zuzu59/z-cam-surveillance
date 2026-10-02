@@ -1,6 +1,7 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const form = $("config-form");
+  const saveButton = $("save-config-button");
   const urlFields = [
     ["low-resolution-url", "clear-low-url"],
     ["high-resolution-url", "clear-high-url"],
@@ -38,6 +39,40 @@
       setSecretVisibility(button, false);
     });
   };
+  const waitForApplicationRestart = (config, oldInstanceId) => {
+    const destination = new URL(window.location.href);
+    const configuredHost = String(config.host || "").trim();
+    if (configuredHost && !["0.0.0.0", "::", "*"].includes(configuredHost)) {
+      destination.hostname = configuredHost;
+    }
+    const configuredPort = Number(config.port);
+    if (Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort <= 65535) {
+      destination.port = String(configuredPort);
+    }
+    const deadline = Date.now() + 90_000;
+    const check = async () => {
+      if (Date.now() >= deadline) {
+        showFeedback("Le serveur n’a pas redémarré. Vérifiez les paramètres puis relancez ./start.sh.", "error");
+        saveButton.disabled = false;
+        return;
+      }
+      try {
+        const response = await fetch(new URL("/api/state", destination.origin), { cache: "no-store" });
+        if (response.ok) {
+          const state = await response.json();
+          if (state.server_instance_id !== oldInstanceId) {
+            window.location.replace(destination.href);
+            return;
+          }
+        }
+      } catch (_) {
+        // The server is expected to be unreachable while it is restarting.
+      }
+      window.setTimeout(check, 500);
+    };
+    window.setTimeout(check, 1_500);
+  };
+
   const loadConfig = async () => {
     try {
       const response = await fetch("/api/config", { cache: "no-store" });
@@ -104,7 +139,6 @@
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const button = form.querySelector("button[type=submit]");
     const payload = {
       threshold: Number($("threshold").value),
       interval: Number($("interval").value),
@@ -117,13 +151,15 @@
       port: Number($("port").value),
       clear_low_resolution_url: $("clear-low-url").checked,
       clear_high_resolution_url: $("clear-high-url").checked,
+      restart_application: true,
     };
     const lowUrl = $("low-resolution-url").value.trim();
     const highUrl = $("high-resolution-url").value.trim();
     if (lowUrl) payload.low_resolution_url = lowUrl;
     if (highUrl) payload.high_resolution_url = highUrl;
     showFeedback("Validation et sauvegarde de tous les paramètres…");
-    button.disabled = true;
+    saveButton.disabled = true;
+    let restartScheduled = false;
     try {
       const response = await fetch("/api/config", {
         method: "POST",
@@ -142,14 +178,17 @@
         $(clearId).checked = false;
         setSecretVisibility(toggle, false);
       });
-      const pending = result.config.restart_required_fields || [];
-      const names = pending.map((field) => restartLabels[field] || field);
-      const suffix = names.length ? ` Redémarrage requis pour appliquer : ${names.join(", ")}.` : "";
-      showFeedback(`Configuration enregistrée dans le fichier JSON.${suffix}`, "success");
+      restartScheduled = Boolean(result.restart_scheduled);
+      if (restartScheduled) {
+        showFeedback("Configuration enregistrée. Redémarrage de l’application…", "success");
+        waitForApplicationRestart(result.config, result.server_instance_id);
+      } else {
+        showFeedback("Configuration enregistrée dans le fichier JSON.", "success");
+      }
     } catch (error) {
       showFeedback(error.message || "Impossible d’enregistrer la configuration.", "error");
     } finally {
-      button.disabled = false;
+      if (!restartScheduled) saveButton.disabled = false;
     }
   });
 

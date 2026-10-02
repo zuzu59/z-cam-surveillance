@@ -1,7 +1,11 @@
 """Web application routes for local RTSP surveillance."""
 from __future__ import annotations
 
+import logging
 import os
+import subprocess
+import threading
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -10,9 +14,39 @@ from flask import Flask, Response, abort, jsonify, render_template, request, sen
 from surveillance_recordings import list_recordings, recording_details, recordings_directory, resolve_recording
 
 
+def _launch_start_script() -> None:
+    start_script = Path(__file__).resolve().with_name("start.sh")
+    runtime_dir = start_script.parent / ".runtime"
+    try:
+        runtime_dir.mkdir(mode=0o700, exist_ok=True)
+        runtime_dir.chmod(0o700)
+        log_path = runtime_dir / "surveillance.log"
+        log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        os.chmod(log_path, 0o600)
+        with os.fdopen(log_fd, "ab", buffering=0) as log_file:
+            subprocess.Popen(
+                [str(start_script)],
+                cwd=start_script.parent,
+                stdin=subprocess.DEVNULL,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+                close_fds=True,
+            )
+    except OSError:
+        logging.exception("Impossible de relancer l’application avec start.sh")
+
+
+def _schedule_application_restart() -> None:
+    timer = threading.Timer(1.25, _launch_start_script)
+    timer.daemon = True
+    timer.start()
+
+
 def create_app(engine: Any) -> Flask:
     app = Flask(__name__, template_folder="templates", static_folder="static")
     app.config["MAX_CONTENT_LENGTH"] = 8 * 1024
+    app.config["SERVER_INSTANCE_ID"] = uuid.uuid4().hex
 
     @app.context_processor
     def inject_app_info() -> dict[str, str]:
@@ -102,7 +136,11 @@ def create_app(engine: Any) -> Flask:
     @app.get("/api/state")
     def state() -> Any:
         # The stream URL is intentionally never included in status responses.
-        return jsonify(engine.status_snapshot())
+        return jsonify(
+            **engine.status_snapshot(),
+            server_pid=os.getpid(),
+            server_instance_id=app.config["SERVER_INSTANCE_ID"],
+        )
 
     @app.post("/api/config/reveal")
     def reveal_configured_url() -> Any:
@@ -122,11 +160,24 @@ def create_app(engine: Any) -> Flask:
         payload = request.get_json(silent=True)
         if not isinstance(payload, dict):
             return jsonify(ok=False, error="Configuration JSON invalide."), 400
+        restart_application = payload.get("restart_application", False)
+        if not isinstance(restart_application, bool):
+            return jsonify(ok=False, error="La demande de redémarrage doit être booléenne."), 400
+        settings = {key: value for key, value in payload.items() if key != "restart_application"}
         try:
-            engine.update_settings(payload)
+            engine.update_settings(settings)
         except (TypeError, ValueError) as exc:
             return jsonify(ok=False, error=str(exc)), 400
-        return jsonify(ok=True, settings=engine.settings_snapshot(), config=engine.config_snapshot())
+        if restart_application:
+            _schedule_application_restart()
+        return jsonify(
+            ok=True,
+            settings=engine.settings_snapshot(),
+            config=engine.config_snapshot(),
+            restart_scheduled=restart_application,
+            server_pid=os.getpid(),
+            server_instance_id=app.config["SERVER_INSTANCE_ID"],
+        )
 
     @app.get("/video_feed")
     def video_feed() -> Response:

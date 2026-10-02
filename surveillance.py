@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import argparse
 import logging
+import math
+import signal
 import threading
-from concurrent.futures import ThreadPoolExecutor
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -173,6 +175,21 @@ class Surveillance:
         self.inference_thread: threading.Thread | None = None
         self.recording_thread: threading.Thread | None = None
         self.media_transcoder = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mp4-h264-transcode")
+
+    def _should_record_unlocked(self, now: float | None = None) -> bool:
+        if not (self.record_requested and self.recording_enabled):
+            return False
+        elapsed = (time.monotonic() if now is None else now) - self.last_detection
+        if self.no_detection_seconds > 0 and elapsed >= self.no_detection_seconds:
+            self.record_requested = False
+            return False
+        return True
+
+    @staticmethod
+    def _wall_clock_frame_target(elapsed: float, fps: float) -> int:
+        if not math.isfinite(fps) or fps <= 0:
+            return 1
+        return max(1, int(max(0.0, elapsed) * fps))
 
     def update_settings(self, payload: dict[str, Any]) -> None:
         """Validate and persist the full JSON configuration without exposing RTSP URLs."""
@@ -412,24 +429,37 @@ class Surveillance:
         writer: Any = None
         writer_path: Path | None = None
         writer_frames = 0
+        writer_started_at: float | None = None
+        writer_fps = 0.0
         published_path: Path | None = None
         last_size: tuple[int, int] | None = None
         reconnect_delay = 1.0
         warned_missing_source = False
 
         def close_writer() -> None:
-            nonlocal writer, writer_path, writer_frames, published_path, last_size
+            nonlocal writer, writer_path, writer_frames, writer_started_at, writer_fps
+            nonlocal published_path, last_size
             current_writer = writer
             current_path = writer_path
             current_published_path = published_path
             current_frames = writer_frames
+            current_started_at = writer_started_at
+            current_fps = writer_fps
             writer = None
             writer_path = None
             published_path = None
             writer_frames = 0
+            writer_started_at = None
+            writer_fps = 0.0
             last_size = None
             if current_writer is not None:
                 current_writer.release()
+                if current_frames and current_started_at is not None and current_fps > 0:
+                    elapsed = max(0.0, time.monotonic() - current_started_at)
+                    logging.info(
+                        "Enregistrement clôturé : %d images, %.2f s réelles / %.2f s vidéo",
+                        current_frames, elapsed, current_frames / current_fps,
+                    )
             if current_frames == 0 and current_path is not None:
                 try:
                     current_path.unlink(missing_ok=True)
@@ -451,15 +481,6 @@ class Surveillance:
                 capture.release()
                 capture = None
 
-        def should_record_unlocked() -> bool:
-            if not (self.record_requested and self.recording_enabled):
-                return False
-            if (self.no_detection_seconds > 0
-                    and time.monotonic() - self.last_detection >= self.no_detection_seconds):
-                self.record_requested = False
-                return False
-            return True
-
         try:
             while not self.stop_event.is_set():
                 if self.recording_reconnect_event.is_set():
@@ -467,7 +488,7 @@ class Surveillance:
                     close_writer()
                     close_capture()
                 with self.lock:
-                    should_record = should_record_unlocked()
+                    should_record = self._should_record_unlocked()
                     stream_url = self.high_resolution_url
                 if not should_record:
                     close_writer()
@@ -508,7 +529,7 @@ class Surveillance:
                     self.stop_event.wait(1.0)
                     continue
                 with self.lock:
-                    should_record = should_record_unlocked()
+                    should_record = self._should_record_unlocked()
                 if not should_record:
                     close_writer()
                     close_capture()
@@ -518,14 +539,16 @@ class Surveillance:
                     self.output_dir.mkdir(parents=True, exist_ok=True)
                     filename = self.output_dir / f"{datetime.now():%Y%m%d_%H%M%S_%f}.mp4"
                     fps = capture.get(cv2.CAP_PROP_FPS)
+                    writer_fps = float(fps) if math.isfinite(fps) and fps > 0 else 10.0
                     writer_path = filename.with_name(f".{filename.stem}.recording.mp4")
                     published_path = filename
                     writer = cv2.VideoWriter(str(writer_path), cv2.VideoWriter_fourcc(*"mp4v"),
-                                             fps if fps and fps > 0 else 10.0, (width, height))
+                                             writer_fps, (width, height))
                     if not writer.isOpened():
                         logging.error("Impossible de créer le MP4 haute résolution (%dx%d)", width, height)
                         close_writer()
                         continue
+                    writer_started_at = time.monotonic()
                     last_size = (width, height)
                     with self.lock:
                         self.recording_active = True
@@ -534,8 +557,13 @@ class Surveillance:
                     close_writer()
                     logging.warning("Résolution haute du flux modifiée; clip fermé")
                     continue
-                writer.write(frame)
-                writer_frames += 1
+                target_frames = self._wall_clock_frame_target(
+                    time.monotonic() - writer_started_at, writer_fps
+                )
+                frames_to_write = max(0, target_frames - writer_frames)
+                for _ in range(frames_to_write):
+                    writer.write(frame)
+                writer_frames += frames_to_write
         finally:
             close_writer()
             close_capture()
@@ -563,7 +591,8 @@ class Surveillance:
                         self.record_requested = True
                         self.last_detection = now
                         self.recording_wakeup_event.set()
-                    elif self.record_requested and now - self.last_detection >= self.no_detection_seconds:
+                    elif (self.record_requested and self.no_detection_seconds > 0
+                          and now - self.last_detection >= self.no_detection_seconds):
                         self.record_requested = False
                 for detection in detections:
                     logging.info("[ALERTE] %s détecté (%.0f%%)", detection.label, detection.confidence * 100)
@@ -572,6 +601,11 @@ class Surveillance:
             except Exception:
                 logging.exception("Erreur pendant l'inférence TFLite")
             self.stop_event.wait(interval)
+
+def _handle_termination_signal(signum: int, _frame: Any) -> None:
+    logging.info("Arrêt demandé par le signal %d", signum)
+    raise KeyboardInterrupt
+
 
 def main() -> None:
     from app_version import APP_VERSION
@@ -625,6 +659,7 @@ def main() -> None:
     )
     from surveillance_web import create_app
 
+    signal.signal(signal.SIGTERM, _handle_termination_signal)
     engine.start()
     logging.info("Tableau de surveillance disponible sur http://%s:%d", config["host"], config["port"])
     try:

@@ -3,7 +3,10 @@
 {% block page_class %}configuration-page{% endblock %}
 {% block content %}
 <main class="workspace narrow-workspace">
-  <div class="page-heading"><div><p class="eyebrow">APPLICATION / PARAMÈTRES</p><h1>Configuration</h1><p class="lede">Modifiez et sauvegardez en une fois les paramètres du fichier JSON local.</p></div></div>
+  <div class="page-heading config-page-heading">
+    <div><p class="eyebrow">APPLICATION / PARAMÈTRES</p><h1>Configuration</h1><p class="lede">Modifiez et sauvegardez en une fois les paramètres du fichier JSON local.</p></div>
+    <button id="save-config-button" class="apply-button" type="submit" form="config-form">Sauvegarder et recharger</button>
+  </div>
   <section class="configuration-panel">
     <div class="panel-heading"><div><h2>Paramètres de surveillance</h2><p>Les URL RTSP restent masquées par défaut. Utilisez l’œil pour les révéler à la demande.</p></div></div>
     <form id="config-form" class="config-form" autocomplete="off">
@@ -54,7 +57,6 @@
       </fieldset>
 
       <div id="config-feedback" class="form-feedback" role="status" aria-live="polite"></div>
-      <button class="apply-button" type="submit">Sauvegarder tous les paramètres</button>
     </form>
   </section>
   <footer class="page-footer"><span>L’œil affiche l’URL complète, mot de passe compris.</span><span>Accès sans authentification : utilisez un réseau de confiance.</span></footer>
