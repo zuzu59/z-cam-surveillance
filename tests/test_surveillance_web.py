@@ -8,6 +8,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from types import SimpleNamespace
 
+import cv2
 import numpy as np
 
 from app_version import APP_VERSION
@@ -65,11 +66,11 @@ class SurveillanceDashboardTests(unittest.TestCase):
         self.assertEqual(self.engine.settings_snapshot()["interval"], 0.7)
         self.assertFalse(self.engine.settings_snapshot()["recording_enabled"])
 
-    def test_recording_frame_count_tracks_wall_clock_not_decode_rate(self):
-        self.assertEqual(self.engine._wall_clock_frame_target(4.0, 25.0), 100)
-        self.assertEqual(self.engine._wall_clock_frame_target(10.0, 25.0), 250)
-        self.assertEqual(self.engine._wall_clock_frame_target(0.0, 25.0), 1)
-        self.assertEqual(self.engine._wall_clock_frame_target(10.0, 0.0), 1)
+    def test_recording_frame_count_matches_source_time(self):
+        self.assertEqual(self.engine._frame_target_for_elapsed(4.0, 25.0), 100)
+        self.assertEqual(self.engine._frame_target_for_elapsed(10.0, 25.0), 250)
+        self.assertEqual(self.engine._frame_target_for_elapsed(0.0, 25.0), 1)
+        self.assertEqual(self.engine._frame_target_for_elapsed(10.0, 0.0), 1)
 
     def test_timeout_uses_updated_value_in_the_recording_decision(self):
         self.engine.recording_enabled = True
@@ -219,7 +220,7 @@ class SurveillanceDashboardTests(unittest.TestCase):
             writer_factory.assert_not_called()
             self.assertEqual(list(Path(output).iterdir()), [])
 
-    def test_recording_uses_high_resolution_stream(self):
+    def test_recording_uses_high_resolution_stream_and_source_pts(self):
         with TemporaryDirectory() as output:
             engine = Surveillance("rtsp://camera/low", SimpleNamespace(threshold=0.5),
                                   0.5, 0.5, 10, Path(output), high_resolution_url="rtsp://camera/high")
@@ -239,14 +240,18 @@ class SurveillanceDashboardTests(unittest.TestCase):
 
                 def read(self):
                     self.read_count += 1
-                    clock[0] += 0.2  # Simulate a decoder slower than the advertised 15 FPS.
+                    clock[0] += 0.03  # Decoder drains buffered frames faster than their source PTS.
                     frames.append(np.zeros((720, 1280, 3), dtype=np.uint8))
                     if self.read_count == 3:
                         engine.stop_event.set()
                     return True, frames[-1]
 
-                def get(self, _property):
-                    return 15.0
+                def get(self, prop):
+                    if prop == cv2.CAP_PROP_FPS:
+                        return 25.0
+                    if prop == cv2.CAP_PROP_POS_MSEC:
+                        return (self.read_count - 1) * 100.0
+                    return 0.0
 
                 def release(self):
                     pass
@@ -275,7 +280,8 @@ class SurveillanceDashboardTests(unittest.TestCase):
                 engine.media_transcoder.shutdown(wait=True)
             self.assertEqual(capture_urls, ["rtsp://camera/high"])
             self.assertEqual(writer_factory.call_args.args[3], (1280, 720))
-            self.assertEqual(writer.written, 6)
+            self.assertEqual(writer_factory.call_args.args[2], 25.0)
+            self.assertEqual(writer.written, 5)
             self.assertTrue(writer.released)
             finalize_recording.assert_called_once()
             raw_path, published_path = finalize_recording.call_args.args

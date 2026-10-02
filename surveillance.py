@@ -186,7 +186,7 @@ class Surveillance:
         return True
 
     @staticmethod
-    def _wall_clock_frame_target(elapsed: float, fps: float) -> int:
+    def _frame_target_for_elapsed(elapsed: float, fps: float) -> int:
         if not math.isfinite(fps) or fps <= 0:
             return 1
         return max(1, int(max(0.0, elapsed) * fps))
@@ -430,14 +430,17 @@ class Surveillance:
         writer_path: Path | None = None
         writer_frames = 0
         writer_started_at: float | None = None
+        writer_start_stream_position: float | None = None
         writer_fps = 0.0
+        last_writer_frame: np.ndarray | None = None
         published_path: Path | None = None
         last_size: tuple[int, int] | None = None
         reconnect_delay = 1.0
         warned_missing_source = False
 
         def close_writer() -> None:
-            nonlocal writer, writer_path, writer_frames, writer_started_at, writer_fps
+            nonlocal writer, writer_path, writer_frames, writer_started_at
+            nonlocal writer_start_stream_position, writer_fps, last_writer_frame
             nonlocal published_path, last_size
             current_writer = writer
             current_path = writer_path
@@ -450,7 +453,9 @@ class Surveillance:
             published_path = None
             writer_frames = 0
             writer_started_at = None
+            writer_start_stream_position = None
             writer_fps = 0.0
+            last_writer_frame = None
             last_size = None
             if current_writer is not None:
                 current_writer.release()
@@ -522,6 +527,13 @@ class Surveillance:
                     reconnect_delay = 1.0
                     logging.info("Flux haute résolution connecté")
                 ok, frame = capture.read()
+                frame_read_at = time.monotonic()
+                position_msec = capture.get(cv2.CAP_PROP_POS_MSEC) if ok else float("nan")
+                stream_position = (
+                    position_msec / 1000.0
+                    if math.isfinite(position_msec) and position_msec >= 0
+                    else None
+                )
                 if not ok or frame is None:
                     logging.warning("Flux haute résolution interrompu; reconnexion automatique")
                     close_writer()
@@ -549,6 +561,7 @@ class Surveillance:
                         close_writer()
                         continue
                     writer_started_at = time.monotonic()
+                    writer_start_stream_position = stream_position
                     last_size = (width, height)
                     with self.lock:
                         self.recording_active = True
@@ -557,13 +570,25 @@ class Surveillance:
                     close_writer()
                     logging.warning("Résolution haute du flux modifiée; clip fermé")
                     continue
-                target_frames = self._wall_clock_frame_target(
-                    time.monotonic() - writer_started_at, writer_fps
+                wall_elapsed = max(0.0, frame_read_at - writer_started_at)
+                # OpenCV can drain buffered RTSP frames faster than real time; trust
+                # their media position when available, and use monotonic time as fallback.
+                stream_elapsed = (
+                    max(0.0, stream_position - writer_start_stream_position)
+                    if stream_position is not None and writer_start_stream_position is not None
+                    else 0.0
+                )
+                elapsed = max(wall_elapsed, stream_elapsed)
+                target_frames = max(
+                    writer_frames, self._frame_target_for_elapsed(elapsed, writer_fps)
                 )
                 frames_to_write = max(0, target_frames - writer_frames)
-                for _ in range(frames_to_write):
+                for _ in range(max(0, frames_to_write - 1)):
+                    writer.write(last_writer_frame if last_writer_frame is not None else frame)
+                if frames_to_write:
                     writer.write(frame)
-                writer_frames += frames_to_write
+                    writer_frames += frames_to_write
+                    last_writer_frame = frame
         finally:
             close_writer()
             close_capture()
