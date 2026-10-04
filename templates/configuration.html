@@ -45,12 +45,28 @@
           <div class="field-group"><label class="check-row main-check"><input id="recording-enabled" type="checkbox"><span>Activer l’enregistrement événementiel MP4</span></label><p class="field-hint">Les clips utilisent le flux haute résolution.</p></div>
           <div class="field-group"><label for="output-dir">Dossier des enregistrements</label><input id="output-dir" type="text" required></div>
         </div>
+        <div class="field-group label-selection">
+          <div class="label-selection-header">
+            <div>
+              <p id="enabled-labels-title" class="label-selection-title">Classes de détection</p>
+              <p id="enabled-labels-help" class="field-hint">Cochez les objets à détecter. Par défaut : personnes, voitures, vélos, motos, chiens et chats.</p>
+            </div>
+            <div class="label-selection-actions">
+              <button id="select-all-labels" class="label-selection-action" type="button">Tout cocher</button>
+              <button id="clear-labels" class="label-selection-action" type="button">Tout décocher</button>
+            </div>
+          </div>
+          <div id="enabled-labels" class="label-checkbox-grid" role="group" aria-labelledby="enabled-labels-title" aria-describedby="enabled-labels-help">
+            <span class="field-hint">Chargement des classes disponibles…</span>
+          </div>
+          <p id="enabled-labels-count" class="label-selection-count" aria-live="polite"></p>
+        </div>
       </fieldset>
 
       <fieldset class="config-section"><legend>Modèle et serveur web</legend>
         <div class="config-grid">
           <div class="field-group"><label for="model">Fichier du modèle TFLite</label><input id="model" type="text" required><p class="field-hint">Un changement du modèle prend effet après redémarrage.</p></div>
-          <div class="field-group"><label for="labels">Fichier des labels</label><input id="labels" type="text" required><p class="field-hint">Un changement des labels prend effet après redémarrage.</p></div>
+          <div class="field-group"><label for="labels">Fichier des labels du modèle</label><input id="labels" type="text" required><p class="field-hint">Un changement de ce fichier prend effet après redémarrage. Les classes à détecter se cochent plus haut.</p></div>
           <div class="field-group"><label for="host">Adresse d’écoute du serveur web</label><input id="host" type="text" required><p class="field-hint">Un changement de l’adresse prend effet après redémarrage.</p></div>
           <div class="field-group"><label for="port">Port du serveur web (1–65535)</label><input id="port" type="number" min="1" max="65535" step="1" required><p class="field-hint">Un changement du port prend effet après redémarrage.</p></div>
         </div>

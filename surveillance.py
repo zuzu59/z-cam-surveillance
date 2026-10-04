@@ -20,6 +20,7 @@ import numpy as np
 from surveillance_media import transcode_mp4_to_h264
 from surveillance_config import (
     DEFAULT_CONFIG,
+    DEFAULT_ENABLED_LABELS,
     load_config,
     save_config,
     validate_config,
@@ -37,7 +38,7 @@ except ImportError:
         except ImportError:
             Interpreter = None  # type: ignore[assignment,misc]
 
-TARGETS = {"person", "car", "bicycle", "motorcycle", "dog", "cat"}
+TARGETS = set(DEFAULT_ENABLED_LABELS)
 COCO_LABELS = [
     "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
     "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog",
@@ -78,10 +79,12 @@ def label_for_class(labels: list[str], class_id: int) -> str:
 
 
 class TFLiteDetector:
-    def __init__(self, model_path: str, labels_path: str | None, threshold: float):
+    def __init__(self, model_path: str, labels_path: str | None, threshold: float,
+                 enabled_labels: list[str] | None = None):
         if Interpreter is None:
             raise RuntimeError("TFLite introuvable. Installez ai-edge-litert (ou un runtime compatible).")
         self.labels = load_labels(labels_path)
+        self.enabled_labels = frozenset(TARGETS if enabled_labels is None else enabled_labels)
         self.threshold = threshold
         self.interpreter = Interpreter(model_path=model_path, num_threads=2)
         self.interpreter.allocate_tensors()
@@ -121,7 +124,7 @@ class TFLiteDetector:
             # Model classes are zero-based; the bundled 90-entry COCO map keeps
             # the original category gaps as n/a entries, so class 0 is person.
             label = label_for_class(self.labels, index)
-            if label in TARGETS:
+            if label in self.enabled_labels:
                 y_min, x_min, y_max, x_max = (float(v) for v in box)
                 detections.append(Detection(label, confidence, (y_min, x_min, y_max, x_max)))
         return detections
@@ -153,6 +156,9 @@ class Surveillance:
             "recording_enabled": recording_enabled,
             "output_dir": str(output_dir),
         })
+        self.config.setdefault("enabled_labels", list(DEFAULT_ENABLED_LABELS))
+        self.config["enabled_labels"] = list(self.config["enabled_labels"])
+        self.detector.enabled_labels = frozenset(self.config["enabled_labels"])
         self.startup_config = self.config.copy()
         self.pending_restart_fields: set[str] = set()
         self.stop_event = threading.Event()
@@ -190,6 +196,17 @@ class Surveillance:
         if not math.isfinite(fps) or fps <= 0:
             return 1
         return max(1, int(max(0.0, elapsed) * fps))
+
+    def available_labels(self) -> list[str]:
+        labels = getattr(self.detector, "labels", None)
+        if labels is None:
+            try:
+                labels = load_labels(self.config.get("labels"))
+            except (OSError, UnicodeError):
+                labels = COCO_LABELS
+        return list(dict.fromkeys(
+            label.strip() for label in labels if label.strip() and label.strip().casefold() != "n/a"
+        ))
 
     def update_settings(self, payload: dict[str, Any]) -> None:
         """Validate and persist the full JSON configuration without exposing RTSP URLs."""
@@ -231,7 +248,14 @@ class Surveillance:
             for field in ("output_dir", "model", "labels", "host"):
                 if field in payload:
                     candidate[field] = payload[field]
+            if "enabled_labels" in payload:
+                candidate["enabled_labels"] = payload["enabled_labels"]
             candidate = validate_config(candidate)
+            unknown_labels = set(candidate["enabled_labels"]) - set(self.available_labels())
+            if unknown_labels:
+                raise ValueError(
+                    "Labels de détection inconnus: " + ", ".join(sorted(unknown_labels))
+                )
             if self.config_path is not None:
                 try:
                     save_config(self.config_path, candidate)
@@ -255,6 +279,7 @@ class Surveillance:
             self.recording_enabled = candidate["recording_enabled"]
             self.output_dir = Path(candidate["output_dir"])
             self.detector.threshold = self.threshold
+            self.detector.enabled_labels = frozenset(candidate["enabled_labels"])
             if low_changed:
                 self.latest_frame = None
                 self.latest_detections = []
@@ -308,6 +333,7 @@ class Surveillance:
             snapshot = {key: value for key, value in self.config.items()
                         if key not in {"low_resolution_url", "high_resolution_url"}}
             snapshot.update({
+                "available_labels": self.available_labels(),
                 "low_stream_configured": bool(self.low_resolution_url),
                 "high_stream_configured": bool(self.high_resolution_url),
                 "restart_required_fields": sorted(self.pending_restart_fields),
@@ -675,7 +701,9 @@ def main() -> None:
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     cv2.setNumThreads(2)
-    detector = TFLiteDetector(config["model"], config["labels"], config["threshold"])
+    detector = TFLiteDetector(
+        config["model"], config["labels"], config["threshold"], config["enabled_labels"]
+    )
     engine = Surveillance(
         config["low_resolution_url"], detector, config["threshold"], config["interval"],
         config["no_detection_seconds"], Path(config["output_dir"]),

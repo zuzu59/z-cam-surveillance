@@ -12,8 +12,8 @@ import cv2
 import numpy as np
 
 from app_version import APP_VERSION
-from surveillance import Detection, Surveillance, label_for_class, load_labels
-from surveillance_config import DEFAULT_CONFIG
+from surveillance import Detection, Surveillance, TFLiteDetector, label_for_class, load_labels
+from surveillance_config import DEFAULT_CONFIG, DEFAULT_ENABLED_LABELS, validate_config
 from surveillance_web import create_app
 
 
@@ -47,12 +47,55 @@ class SurveillanceDashboardTests(unittest.TestCase):
         config_page = self.client.get("/configuration").get_data(as_text=True)
         self.assertIn('form="config-form"', config_page)
         self.assertIn("Sauvegarder et recharger", config_page)
-        self.assertEqual(APP_VERSION, "0.0.3")
+        self.assertIn('id="enabled-labels"', config_page)
+        self.assertIn('id="select-all-labels"', config_page)
+        self.assertIn('id="clear-labels"', config_page)
+        self.assertEqual(APP_VERSION, "0.0.5")
         self.assertIn(APP_VERSION.encode(), self.client.get("/about").data)
         self.assertNotIn(b"MODE TEST", self.client.get("/").data)
 
     def test_default_configuration_has_no_operating_mode(self):
         self.assertNotIn("mode", DEFAULT_CONFIG)
+        self.assertEqual(set(DEFAULT_ENABLED_LABELS), set(DEFAULT_CONFIG["enabled_labels"]))
+
+    def test_legacy_configuration_defaults_to_previous_detection_labels(self):
+        legacy_config = DEFAULT_CONFIG.copy()
+        legacy_config.pop("enabled_labels")
+        migrated = validate_config(legacy_config)
+        self.assertEqual(migrated["enabled_labels"], list(DEFAULT_ENABLED_LABELS))
+        self.assertIsNot(migrated["enabled_labels"], DEFAULT_CONFIG["enabled_labels"])
+
+    def test_tflite_detector_filters_by_selected_labels(self):
+        detector = object.__new__(TFLiteDetector)
+        detector.labels = ["person", "bicycle"]
+        detector.enabled_labels = frozenset({"bicycle"})
+        detector.threshold = 0.5
+        detector.width = 16
+        detector.height = 16
+        detector.input = {"dtype": np.uint8, "index": 0}
+        detector.outputs = [{"index": index} for index in range(4)]
+        tensors = {
+            0: np.array([[[0.1, 0.1, 0.5, 0.5], [0.2, 0.2, 0.6, 0.6]]], dtype=np.float32),
+            1: np.array([[0.0, 1.0]], dtype=np.float32),
+            2: np.array([[0.95, 0.90]], dtype=np.float32),
+            3: np.array([2.0], dtype=np.float32),
+        }
+
+        class FakeInterpreter:
+            def set_tensor(self, _index, _tensor):
+                pass
+
+            def invoke(self):
+                pass
+
+            def get_tensor(self, index):
+                return tensors[index]
+
+        detector.interpreter = FakeInterpreter()
+        found = detector.detect(np.zeros((16, 16, 3), dtype=np.uint8))
+        self.assertEqual([detection.label for detection in found], ["bicycle"])
+        detector.enabled_labels = frozenset()
+        self.assertEqual(detector.detect(np.zeros((16, 16, 3), dtype=np.uint8)), [])
 
     def test_settings_update_without_restart(self):
         response = self.client.post("/api/config", json={
@@ -60,11 +103,13 @@ class SurveillanceDashboardTests(unittest.TestCase):
             "interval": 0.7,
             "no_detection_seconds": 6,
             "recording_enabled": False,
+            "enabled_labels": ["bus"],
         })
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.engine.detector.threshold, 0.65)
         self.assertEqual(self.engine.settings_snapshot()["interval"], 0.7)
         self.assertFalse(self.engine.settings_snapshot()["recording_enabled"])
+        self.assertEqual(self.engine.detector.enabled_labels, frozenset({"bus"}))
 
     def test_recording_frame_count_matches_source_time(self):
         self.assertEqual(self.engine._frame_target_for_elapsed(4.0, 25.0), 100)
@@ -86,6 +131,16 @@ class SurveillanceDashboardTests(unittest.TestCase):
         self.engine.no_detection_seconds = 0.0
         self.engine.record_requested = True
         self.assertTrue(self.engine._should_record_unlocked(now=10_000.0))
+
+    def test_rejects_non_list_detection_labels_without_partial_update(self):
+        response = self.client.post("/api/config", json={"enabled_labels": "person"})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.engine.config["enabled_labels"], list(DEFAULT_ENABLED_LABELS))
+
+    def test_rejects_unknown_detection_label_without_partial_update(self):
+        response = self.client.post("/api/config", json={"enabled_labels": ["not-a-model-label"]})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.engine.config["enabled_labels"], list(DEFAULT_ENABLED_LABELS))
 
     def test_rejects_bad_config_without_partial_update(self):
         response = self.client.post("/api/config", json={
@@ -167,6 +222,7 @@ class SurveillanceDashboardTests(unittest.TestCase):
                     "interval": 1.2,
                     "no_detection_seconds": 18,
                     "recording_enabled": False,
+                    "enabled_labels": ["person", "bus"],
                     "output_dir": "event-clips",
                     "model": "models/custom.tflite",
                     "labels": "models/custom.txt",
@@ -181,6 +237,9 @@ class SurveillanceDashboardTests(unittest.TestCase):
             self.assertEqual(result["config"]["model"], "models/custom.tflite")
             self.assertEqual(result["config"]["host"], "127.0.0.1")
             self.assertEqual(result["config"]["port"], 8123)
+            self.assertEqual(result["config"]["enabled_labels"], ["person", "bus"])
+            self.assertIn("bus", result["config"]["available_labels"])
+            self.assertNotIn("n/a", result["config"]["available_labels"])
             self.assertEqual(result["config"]["restart_required_fields"], ["host", "labels", "model", "port"])
             self.assertTrue(result["restart_scheduled"])
             status = client.get("/api/state").get_json()
@@ -196,6 +255,7 @@ class SurveillanceDashboardTests(unittest.TestCase):
             self.assertFalse(saved["recording_enabled"])
             self.assertEqual(saved["output_dir"], "event-clips")
             self.assertEqual(saved["port"], 8123)
+            self.assertEqual(saved["enabled_labels"], ["person", "bus"])
             self.assertNotIn("mode", saved)
             self.assertEqual(engine.output_dir, Path("event-clips"))
 

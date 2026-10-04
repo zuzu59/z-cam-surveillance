@@ -185,6 +185,20 @@ input[type="range"]:focus-visible { outline: 2px solid #9bcdf5; outline-offset: 
 .check-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: #d1d9de; font-size: 11px; cursor: pointer; }
 .check-row input { accent-color: #3e9b66; }
 .check-row.main-check { min-height: 38px; margin-top: 15px; }
+.label-selection { grid-column: 1 / -1; padding: 13px; border: 1px solid var(--border-soft); border-radius: 8px; background: rgb(12 17 22 / 65%); }
+.label-selection-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.label-selection-title { margin: 0; color: #e1e7eb; font-size: 11px; font-weight: 600; }
+.label-selection-header .field-hint { margin-top: 5px; }
+.label-selection-actions { display: flex; flex: none; flex-wrap: wrap; gap: 7px; }
+.label-selection-action { min-height: 30px; padding: 0 10px; border: 1px solid #34404a; border-radius: 5px; background: #151d24; color: #cad5dc; font-size: 10px; cursor: pointer; }
+.label-selection-action:hover { border-color: #4c765e; background: #1b2922; color: #c9f0d8; }
+.label-selection-action:focus-visible, .label-checkbox:focus-within { outline: 2px solid #69b78d; outline-offset: 2px; }
+.label-checkbox-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px 7px; max-height: 300px; margin-top: 10px; overflow: auto; padding: 2px; }
+.label-checkbox { display: flex; min-width: 0; min-height: 30px; align-items: center; gap: 7px; padding: 4px 6px; border: 1px solid transparent; border-radius: 5px; color: #c9d3da; font-size: 10px; cursor: pointer; }
+.label-checkbox:hover { background: #151d24; }
+.label-checkbox input { flex: none; width: 14px; height: 14px; margin: 0; accent-color: #3e9b66; }
+.label-checkbox span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.label-selection-count { margin: 8px 2px 0; color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
 .config-form .apply-button { margin-top: 8px; }
 .form-feedback { min-height: 24px; }
 .form-feedback.success { color: #9fe3bd; }
@@ -206,7 +220,7 @@ input[type="range"]:focus-visible { outline: 2px solid #9bcdf5; outline-offset: 
 .help-content article p:last-child { margin-bottom: 0; }
 @media (max-width: 900px) { .dashboard-grid { grid-template-columns: 1fr; } .overview-panel { display: grid; grid-template-columns: 1fr 1fr; column-gap: 20px; } .overview-panel > .panel-heading, .overview-panel > .inline-link { grid-column: 1 / -1; } .overview-stats { align-content: start; } .stream-status { align-content: start; margin-top: 15px; } }
 @media (max-width: 700px) { .topbar { padding: 12px 18px; } .main-nav { order: 3; width: 100%; justify-content: flex-start; overflow-x: auto; } .main-nav a { padding: 8px 9px; } .topbar-right { margin-left: auto; } }
-@media (max-width: 560px) { .topbar { display: flex; align-items: center; padding: 10px 13px 0; } .identity-copy span, .topbar-right { display: none; } .main-nav { gap: 0; margin: 0 -3px; } .main-nav a { padding: 9px 8px; font-size: 10px; } .dashboard-grid { gap: 12px; } .overview-panel { display: block; padding: 0 14px 14px; } .overview-panel > .panel-heading { margin: 0 -14px; padding-right: 14px; padding-left: 14px; } .config-form { padding: 0 13px 15px; } .config-grid { grid-template-columns: 1fr; gap: 0; } .info-panel { padding: 17px; } }
+@media (max-width: 560px) { .topbar { display: flex; align-items: center; padding: 10px 13px 0; } .identity-copy span, .topbar-right { display: none; } .main-nav { gap: 0; margin: 0 -3px; } .main-nav a { padding: 9px 8px; font-size: 10px; } .dashboard-grid { gap: 12px; } .overview-panel { display: block; padding: 0 14px 14px; } .overview-panel > .panel-heading { margin: 0 -14px; padding-right: 14px; padding-left: 14px; } .config-form { padding: 0 13px 15px; } .config-grid { grid-template-columns: 1fr; gap: 0; } .label-selection-header { flex-direction: column; } .label-checkbox-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 330px; } .label-selection-actions { width: 100%; } .info-panel { padding: 17px; } }
 .secret-input { display: flex; width: 100%; min-width: 0; overflow: hidden; border: 1px solid #34404a; border-radius: 6px; background: #0c1116; }
 .secret-input:focus-within { border-color: #69b78d; box-shadow: 0 0 0 3px rgb(88 214 154 / 12%); }
 .config-form .secret-input input[type="password"], .config-form .secret-input input[type="text"] { flex: 1 1 auto; width: 0; height: 38px; border: 0; border-radius: 0; outline: 0; background: transparent; box-shadow: none; }

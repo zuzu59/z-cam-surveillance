@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+DEFAULT_ENABLED_LABELS = ("person", "car", "bicycle", "motorcycle", "dog", "cat")
+
 DEFAULT_CONFIG: dict[str, Any] = {
     "low_resolution_url": "",
     "high_resolution_url": "",
@@ -17,6 +19,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "output_dir": "captures",
     "model": "models/ssd_mobilenet_v2_coco_quant_postprocess.tflite",
     "labels": "models/coco_labels.txt",
+    "enabled_labels": list(DEFAULT_ENABLED_LABELS),
     "host": "0.0.0.0",
     "port": 8091,
 }
@@ -57,6 +60,12 @@ def validate_config(config: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Le délai doit être compris entre 0 et 3600 secondes.")
     if not isinstance(result["recording_enabled"], bool):
         raise ValueError("recording_enabled doit être un booléen.")
+    enabled_labels = result["enabled_labels"]
+    if not isinstance(enabled_labels, list) or any(
+        not isinstance(label, str) or not label.strip() for label in enabled_labels
+    ):
+        raise ValueError("enabled_labels doit être une liste de labels non vides.")
+    result["enabled_labels"] = list(dict.fromkeys(label.strip() for label in enabled_labels))
     if not 1 <= result["port"] <= 65535:
         raise ValueError("Le port doit être compris entre 1 et 65535.")
     for field in ("output_dir", "model", "labels", "host"):

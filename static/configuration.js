@@ -10,6 +10,7 @@
   const textFields = ["output-dir", "model", "labels", "host"];
   const numberFields = ["threshold", "interval", "no-detection-seconds", "port"];
   const restartLabels = { model: "modèle", labels: "labels", host: "adresse d’écoute", port: "port" };
+  const labelOptions = $("enabled-labels");
 
   const showFeedback = (message, type = "") => {
     const feedback = $("config-feedback");
@@ -23,6 +24,41 @@
     button.setAttribute("aria-label", `${visible ? "Masquer" : "Afficher"} l’URL ${button.dataset.source === "low" ? "basse résolution" : "haute résolution"}`);
     button.querySelector(".eye-slash").hidden = !visible;
   };
+  const updateLabelCount = () => {
+    const checkboxes = [...labelOptions.querySelectorAll('input[type="checkbox"]')];
+    const selected = checkboxes.filter((checkbox) => checkbox.checked).length;
+    $("enabled-labels-count").textContent = `${selected} / ${checkboxes.length} classes sélectionnées`;
+  };
+  const renderLabelOptions = (config) => {
+    const available = Array.isArray(config.available_labels)
+      ? [...new Set(config.available_labels.filter((label) => typeof label === "string" && label.trim()))]
+      : [];
+    const selected = new Set(Array.isArray(config.enabled_labels) ? config.enabled_labels : []);
+    labelOptions.replaceChildren();
+    if (!available.length) {
+      const empty = document.createElement("span");
+      empty.className = "field-hint";
+      empty.textContent = "Aucune classe disponible dans le fichier de labels.";
+      labelOptions.append(empty);
+      updateLabelCount();
+      return;
+    }
+    available.forEach((name) => {
+      const row = document.createElement("label");
+      row.className = "label-checkbox";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.name = "enabled_labels";
+      checkbox.value = name;
+      checkbox.checked = selected.has(name);
+      checkbox.addEventListener("change", updateLabelCount);
+      const text = document.createElement("span");
+      text.textContent = name;
+      row.append(checkbox, text);
+      labelOptions.append(row);
+    });
+    updateLabelCount();
+  };
   const hydrate = (config) => {
     numberFields.forEach((id) => {
       const key = id.replaceAll("-", "_");
@@ -30,6 +66,7 @@
     });
     textFields.forEach((id) => $(id).value = config[id.replaceAll("-", "_")]);
     $("recording-enabled").checked = config.recording_enabled;
+    renderLabelOptions(config);
     $("low-url-status").textContent = config.low_stream_configured ? "URL mémorisée · cliquer sur l’œil pour l’afficher" : "Aucune URL mémorisée";
     $("high-url-status").textContent = config.high_stream_configured ? "URL mémorisée · cliquer sur l’œil pour l’afficher" : "Aucune URL mémorisée";
     secretToggles.forEach((button) => {
@@ -89,6 +126,15 @@
     }
   };
 
+  $("select-all-labels").addEventListener("click", () => {
+    labelOptions.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => { checkbox.checked = true; });
+    updateLabelCount();
+  });
+  $("clear-labels").addEventListener("click", () => {
+    labelOptions.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => { checkbox.checked = false; });
+    updateLabelCount();
+  });
+
   urlFields.forEach(([inputId, clearId]) => {
     const toggle = secretToggles.find((button) => button.dataset.target === inputId);
     $(inputId).addEventListener("input", () => {
@@ -144,6 +190,8 @@
       interval: Number($("interval").value),
       no_detection_seconds: Number($("no-detection-seconds").value),
       recording_enabled: $("recording-enabled").checked,
+      enabled_labels: [...labelOptions.querySelectorAll('input[type="checkbox"]:checked')]
+        .map((checkbox) => checkbox.value),
       output_dir: $("output-dir").value.trim(),
       model: $("model").value.trim(),
       labels: $("labels").value.trim(),

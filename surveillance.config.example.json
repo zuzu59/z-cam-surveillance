@@ -8,6 +8,14 @@
   "output_dir": "captures",
   "model": "models/ssd_mobilenet_v2_coco_quant_postprocess.tflite",
   "labels": "models/coco_labels.txt",
+  "enabled_labels": [
+    "person",
+    "car",
+    "bicycle",
+    "motorcycle",
+    "dog",
+    "cat"
+  ],
   "host": "0.0.0.0",
   "port": 8091
 }
