@@ -172,6 +172,8 @@ class Surveillance:
         self.preview_sequence = 0
         self.connected = False
         self.recording_active = False
+        self.recording_evidence_frame: np.ndarray | None = None
+        self.recording_evidence_labels: dict[str, float] = {}
         self.capture_fps = 0.0
         self.last_inference = 0.0
         self.last_detection = 0.0
@@ -196,6 +198,53 @@ class Surveillance:
         if not math.isfinite(fps) or fps <= 0:
             return 1
         return max(1, int(max(0.0, elapsed) * fps))
+
+    @staticmethod
+    def _annotate_detection_frame(frame: np.ndarray, detections: list[Detection]) -> np.ndarray:
+        """Draw green boxes and labels on a copy of the frame that triggered detection."""
+        annotated = frame.copy()
+        height, width = annotated.shape[:2]
+        thickness = max(2, round(min(height, width) / 360))
+        font_scale = max(0.45, min(height, width) / 900)
+        for detection in detections:
+            y_min, x_min, y_max, x_max = detection.box
+            first = (max(0, min(width - 1, round(x_min * width))),
+                     max(0, min(height - 1, round(y_min * height))))
+            second = (max(0, min(width - 1, round(x_max * width))),
+                      max(0, min(height - 1, round(y_max * height))))
+            cv2.rectangle(annotated, first, second, (0, 255, 0), thickness)
+            text = f"{detection.label} {detection.confidence:.0%}"
+            text_y = max(18, first[1] - 8)
+            cv2.putText(annotated, text, (first[0], text_y), cv2.FONT_HERSHEY_SIMPLEX,
+                        font_scale, (0, 0, 0), thickness + 3, cv2.LINE_AA)
+            cv2.putText(annotated, text, (first[0], text_y), cv2.FONT_HERSHEY_SIMPLEX,
+                        font_scale, (0, 255, 0), thickness, cv2.LINE_AA)
+        return annotated
+
+    @staticmethod
+    def _save_recording_evidence(destination: Path, frame: np.ndarray | None,
+                                 labels: dict[str, float]) -> None:
+        """Publish annotated JPG and detected-label TXT sidecars for a completed clip."""
+        if frame is None or not labels:
+            logging.warning("Indices de détection indisponibles pour %s", destination.name)
+            return
+        image_path = destination.with_suffix(".jpg")
+        labels_path = destination.with_suffix(".txt")
+        image_tmp = image_path.with_name(f".{image_path.name}.tmp")
+        labels_tmp = labels_path.with_name(f".{labels_path.name}.tmp")
+        try:
+            ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+            if not ok:
+                raise OSError("Impossible d’encoder l’image de détection en JPEG.")
+            image_tmp.write_bytes(encoded.tobytes())
+            image_tmp.replace(image_path)
+            labels_tmp.write_text("".join(f"{label}\n" for label in sorted(labels, key=str.casefold)),
+                                  encoding="utf-8")
+            labels_tmp.replace(labels_path)
+        except OSError:
+            image_tmp.unlink(missing_ok=True)
+            labels_tmp.unlink(missing_ok=True)
+            logging.exception("Impossible de sauvegarder les indices de détection pour %s", destination.name)
 
     def available_labels(self) -> list[str]:
         labels = getattr(self.detector, "labels", None)
@@ -459,6 +508,8 @@ class Surveillance:
         writer_start_stream_position: float | None = None
         writer_fps = 0.0
         last_writer_frame: np.ndarray | None = None
+        evidence_frame: np.ndarray | None = None
+        evidence_labels: dict[str, float] = {}
         published_path: Path | None = None
         last_size: tuple[int, int] | None = None
         reconnect_delay = 1.0
@@ -467,13 +518,15 @@ class Surveillance:
         def close_writer() -> None:
             nonlocal writer, writer_path, writer_frames, writer_started_at
             nonlocal writer_start_stream_position, writer_fps, last_writer_frame
-            nonlocal published_path, last_size
+            nonlocal evidence_frame, evidence_labels, published_path, last_size
             current_writer = writer
             current_path = writer_path
             current_published_path = published_path
             current_frames = writer_frames
             current_started_at = writer_started_at
             current_fps = writer_fps
+            current_evidence_frame = evidence_frame
+            current_evidence_labels = evidence_labels
             writer = None
             writer_path = None
             published_path = None
@@ -482,6 +535,8 @@ class Surveillance:
             writer_start_stream_position = None
             writer_fps = 0.0
             last_writer_frame = None
+            evidence_frame = None
+            evidence_labels = {}
             last_size = None
             if current_writer is not None:
                 current_writer.release()
@@ -497,14 +552,25 @@ class Surveillance:
                 except OSError:
                     logging.warning("Impossible de supprimer le MP4 vide")
             elif current_frames > 0 and current_path is not None and current_published_path is not None:
+                with self.lock:
+                    current_evidence_labels.update(self.recording_evidence_labels)
+                    self.recording_evidence_frame = None
+                    self.recording_evidence_labels = {}
+                    self.recording_active = False
+                self._save_recording_evidence(
+                    current_published_path, current_evidence_frame, current_evidence_labels
+                )
                 try:
                     self.media_transcoder.submit(
                         self._finalize_recording, current_path, current_published_path
                     )
                 except RuntimeError:
                     self._finalize_recording(current_path, current_published_path)
-            with self.lock:
-                self.recording_active = False
+            else:
+                with self.lock:
+                    self.recording_evidence_frame = None
+                    self.recording_evidence_labels = {}
+                    self.recording_active = False
 
         def close_capture() -> None:
             nonlocal capture
@@ -580,6 +646,10 @@ class Surveillance:
                     writer_fps = float(fps) if math.isfinite(fps) and fps > 0 else 10.0
                     writer_path = filename.with_name(f".{filename.stem}.recording.mp4")
                     published_path = filename
+                    with self.lock:
+                        evidence_frame = (None if self.recording_evidence_frame is None
+                                          else self.recording_evidence_frame.copy())
+                        evidence_labels = self.recording_evidence_labels.copy()
                     writer = cv2.VideoWriter(str(writer_path), cv2.VideoWriter_fourcc(*"mp4v"),
                                              writer_fps, (width, height))
                     if not writer.isOpened():
@@ -639,6 +709,16 @@ class Surveillance:
                         self.preview_sequence += 1
                     was_recording = self.record_requested
                     if detections and self.recording_enabled:
+                        if not was_recording and not self.recording_active:
+                            self.recording_evidence_frame = self._annotate_detection_frame(frame, detections)
+                            self.recording_evidence_labels = {}
+                        elif self.recording_evidence_frame is None:
+                            self.recording_evidence_frame = self._annotate_detection_frame(frame, detections)
+                        for detection in detections:
+                            previous_confidence = self.recording_evidence_labels.get(detection.label, 0.0)
+                            self.recording_evidence_labels[detection.label] = max(
+                                previous_confidence, detection.confidence
+                            )
                         self.record_requested = True
                         self.last_detection = now
                         self.recording_wakeup_event.set()

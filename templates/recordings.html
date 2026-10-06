@@ -34,6 +34,15 @@
         <div class="player-empty" id="player-empty"><span class="empty-play" aria-hidden="true">▶</span><strong>Aucun fichier sélectionné</strong><span>Choisissez un clip dans la liste pour le lire.</span></div>
       </div>
 
+      <section class="event-evidence" aria-labelledby="evidence-title">
+        <div class="evidence-copy">
+          <h3 id="evidence-title">Déclencheur de l’enregistrement</h3>
+          <p id="evidence-message" role="status">Sélectionnez un clip pour afficher les détections associées.</p>
+          <div class="evidence-labels" id="evidence-labels" role="list" aria-label="Labels détectés"></div>
+        </div>
+        <img id="evidence-image" alt="Image annotée avec les cadres verts des détections" hidden>
+      </section>
+
       <div class="playback-toolbar" aria-label="Commandes de lecture">
         <div class="file-navigation" role="group" aria-label="Naviguer entre les fichiers">
           <button class="transport-button" id="previous-file" type="button" aria-label="Fichier précédent" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14M19 6l-10 6 10 6z"/></svg><span>Précédent</span></button>

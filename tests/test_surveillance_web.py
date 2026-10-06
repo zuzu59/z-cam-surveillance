@@ -50,7 +50,7 @@ class SurveillanceDashboardTests(unittest.TestCase):
         self.assertIn('id="enabled-labels"', config_page)
         self.assertIn('id="select-all-labels"', config_page)
         self.assertIn('id="clear-labels"', config_page)
-        self.assertEqual(APP_VERSION, "0.0.6")
+        self.assertEqual(APP_VERSION, "0.0.7")
         self.assertIn(APP_VERSION.encode(), self.client.get("/about").data)
         self.assertNotIn(b"MODE TEST", self.client.get("/").data)
 
@@ -286,6 +286,11 @@ class SurveillanceDashboardTests(unittest.TestCase):
             engine = Surveillance("rtsp://camera/low", SimpleNamespace(threshold=0.5),
                                   0.5, 0.5, 10, Path(output), high_resolution_url="rtsp://camera/high")
             engine.record_requested = True
+            engine.recording_evidence_frame = engine._annotate_detection_frame(
+                np.zeros((48, 80, 3), dtype=np.uint8),
+                [Detection("person", 0.91, (0.1, 0.2, 0.8, 0.7))],
+            )
+            engine.recording_evidence_labels = {"person": 0.91}
             clock = [100.0]
             engine.last_detection = clock[0]
             frames = []
@@ -350,6 +355,8 @@ class SurveillanceDashboardTests(unittest.TestCase):
             self.assertTrue(raw_path.name.endswith(".recording.mp4"))
             self.assertFalse(published_path.name.startswith("."))
             self.assertEqual(published_path.suffix, ".mp4")
+            self.assertTrue(published_path.with_suffix(".jpg").read_bytes().startswith(b"\xff\xd8"))
+            self.assertEqual(published_path.with_suffix(".txt").read_text(encoding="utf-8"), "person\n")
             self.assertFalse(engine.recording_active)
 
     def test_inference_encodes_preview_and_detection_state(self):
@@ -372,6 +379,9 @@ class SurveillanceDashboardTests(unittest.TestCase):
             state = engine.status_snapshot()
             self.assertEqual(state["detections"][0]["label"], "person")
             self.assertTrue(state["recording_requested"])
+            self.assertEqual(engine.recording_evidence_labels, {"person": 0.91})
+            self.assertEqual(engine.recording_evidence_frame.shape, (48, 80, 3))
+            self.assertTupleEqual(tuple(engine.recording_evidence_frame[5, 16]), (0, 255, 0))
         finally:
             engine.stop_event.set()
             worker.join(timeout=1)

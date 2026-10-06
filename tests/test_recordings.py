@@ -69,6 +69,8 @@ class RecordingLibraryTests(unittest.TestCase):
 
     def test_details_include_probe_metadata_without_absolute_paths(self):
         self.create_clip("details.mp4")
+        (self.directory / "details.txt").write_text("person\ncar\n", encoding="utf-8")
+        (self.directory / "details.jpg").write_bytes(b"\xff\xd8synthetic-jpeg")
         metadata = {
             "duration_seconds": 12.5, "width": 1280, "height": 720,
             "codec": "mpeg4", "frame_rate": "25/1", "bit_rate": 800000,
@@ -81,8 +83,25 @@ class RecordingLibraryTests(unittest.TestCase):
         self.assertEqual(details["duration_seconds"], 12.5)
         self.assertEqual(details["width"], 1280)
         self.assertEqual(details["codec"], "mpeg4")
+        self.assertEqual(details["event_labels"], ["person", "car"])
+        self.assertTrue(details["evidence_available"])
         self.assertNotIn("path", details)
         self.assertNotIn(str(self.directory), response.get_data(as_text=True))
+        evidence = self.client.get("/api/recordings/details.mp4/evidence")
+        try:
+            self.assertEqual(evidence.status_code, 200)
+            self.assertEqual(evidence.mimetype, "image/jpeg")
+            self.assertEqual(evidence.data, b"\xff\xd8synthetic-jpeg")
+        finally:
+            evidence.close()
+
+    def test_legacy_clips_without_evidence_remain_supported(self):
+        self.create_clip("legacy.mp4")
+        with patch("surveillance_recordings._probe_media", return_value={}):
+            response = self.client.get("/api/recordings/legacy.mp4")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["event_labels"], [])
+        self.assertFalse(response.get_json()["evidence_available"])
 
     def test_video_route_supports_byte_ranges_for_seeking(self):
         path = self.create_clip(data=b"0123456789")
@@ -107,6 +126,10 @@ class RecordingLibraryTests(unittest.TestCase):
 
     def test_delete_requires_custom_header_and_removes_only_selected_clip(self):
         target = self.create_clip("selected.mp4")
+        evidence_image = target.with_suffix(".jpg")
+        evidence_labels = target.with_suffix(".txt")
+        evidence_image.write_bytes(b"jpeg")
+        evidence_labels.write_text("person\n", encoding="utf-8")
         other = self.create_clip("keep.mp4")
         archive = self.directory / ".originals"
         archive.mkdir()
@@ -120,6 +143,8 @@ class RecordingLibraryTests(unittest.TestCase):
         self.assertEqual(deleted.status_code, 200)
         self.assertEqual(deleted.get_json(), {"ok": True, "name": "selected.mp4"})
         self.assertFalse(target.exists())
+        self.assertFalse(evidence_image.exists())
+        self.assertFalse(evidence_labels.exists())
         self.assertFalse(archived_original.exists())
         self.assertTrue(other.exists())
         missing = self.client.delete(path, headers={"X-Requested-With": "XMLHttpRequest"})

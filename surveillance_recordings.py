@@ -69,6 +69,27 @@ def resolve_recording(output_dir: str | Path, filename: str) -> Path | None:
     return _safe_mp4(recordings_directory(output_dir), filename)
 
 
+def resolve_recording_sidecar(output_dir: str | Path, filename: str,
+                              extension: str) -> Path | None:
+    """Resolve a JPG/TXT sidecar only when its matching MP4 is a safe library item."""
+    if extension not in {".jpg", ".txt"}:
+        return None
+    video_path = resolve_recording(output_dir, filename)
+    if video_path is None:
+        return None
+    candidate = video_path.with_suffix(extension)
+    try:
+        root = recordings_directory(output_dir)
+        if candidate.is_symlink():
+            return None
+        resolved = candidate.resolve(strict=True)
+        if resolved.parent != root or not resolved.is_file():
+            return None
+        return resolved
+    except (OSError, RuntimeError, ValueError):
+        return None
+
+
 def _probe_media(path: Path) -> dict[str, Any]:
     ffprobe = shutil.which("ffprobe")
     if not ffprobe:
@@ -114,8 +135,23 @@ def recording_details(output_dir: str | Path, filename: str) -> dict[str, Any] |
     if path is None:
         return None
     info = path.stat()
+    labels_path = resolve_recording_sidecar(output_dir, filename, ".txt")
+    labels: list[str] = []
+    if labels_path is not None:
+        try:
+            if labels_path.stat().st_size <= 16_384:
+                labels = list(dict.fromkeys(
+                    line.strip()[:128]
+                    for line in labels_path.read_text(encoding="utf-8").splitlines()[:80]
+                    if line.strip()
+                ))
+        except (OSError, UnicodeError):
+            labels = []
+    evidence_path = resolve_recording_sidecar(output_dir, filename, ".jpg")
     return {
         "name": path.name,
+        "event_labels": labels,
+        "evidence_available": evidence_path is not None,
         "size_bytes": info.st_size,
         "modified_at": datetime.fromtimestamp(info.st_mtime).astimezone().isoformat(timespec="seconds"),
         **_probe_media(path),

@@ -72,6 +72,16 @@
     Object.values(detailFields).forEach((id) => { $(id).textContent = "—"; });
     $("details-state").textContent = "En attente d’une sélection";
   };
+  const resetEvidence = () => {
+    const message = $("evidence-message");
+    const labels = $("evidence-labels");
+    const image = $("evidence-image");
+    if (!message || !labels || !image) return;
+    message.textContent = "Sélectionnez un clip pour afficher les détections associées.";
+    labels.replaceChildren();
+    image.removeAttribute("src");
+    image.hidden = true;
+  };
   const updateNavigation = () => {
     const hasSelection = selectedGlobalIndex >= 0 && selectedGlobalIndex < total;
     $("previous-file").disabled = !hasSelection || selectedGlobalIndex >= total - 1;
@@ -136,6 +146,7 @@
     $("player-empty").hidden = false;
     $("delete-confirmation").hidden = true;
     resetDetails();
+    resetEvidence();
     renderFiles();
   };
   const loadPage = async ({ clear = true } = {}) => {
@@ -180,6 +191,7 @@
     ["detail-duration", "detail-resolution", "detail-codec", "detail-frame-rate", "detail-bitrate"].forEach((id) => { $(id).textContent = "Lecture des métadonnées…"; });
     $("delete-confirmation").hidden = true;
     setViewerFeedback("");
+    resetEvidence();
     player.pause();
     player.src = `/api/recordings/${encodeURIComponent(file.name)}/video`;
     player.playbackRate = playbackSpeed;
@@ -206,6 +218,31 @@
       $("detail-codec").textContent = details.codec || "Non disponible";
       $("detail-frame-rate").textContent = formatFrameRate(details.frame_rate);
       $("detail-bitrate").textContent = formatBitrate(details.bit_rate);
+      const labels = Array.isArray(details.event_labels) ? details.event_labels : [];
+      const labelContainer = $("evidence-labels");
+      const evidenceMessage = $("evidence-message");
+      const evidenceImage = $("evidence-image");
+      if (labelContainer && evidenceMessage && evidenceImage) {
+        labelContainer.replaceChildren();
+        for (const label of labels) {
+          const tag = document.createElement("span");
+          tag.className = "evidence-label";
+          tag.setAttribute("role", "listitem");
+          tag.textContent = label;
+          labelContainer.append(tag);
+        }
+        if (details.evidence_available) {
+          evidenceImage.src = `/api/recordings/${encodeURIComponent(file.name)}/evidence`;
+          evidenceImage.hidden = false;
+          evidenceMessage.textContent = labels.length
+            ? "Image du premier instant détecté. Les labels listés ont été observés pendant l’enregistrement."
+            : "Image annotée disponible; aucun label lisible dans le fichier associé.";
+        } else {
+          evidenceMessage.textContent = labels.length
+            ? "Labels détectés pendant l’enregistrement; image annotée indisponible."
+            : "Aucune image ou liste de labels associée à ce clip.";
+        }
+      }
       $("details-state").textContent = "Métadonnées du fichier";
     } catch (error) {
       if (version !== selectionVersion) return;

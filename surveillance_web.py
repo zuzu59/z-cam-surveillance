@@ -11,7 +11,13 @@ from typing import Any
 
 from app_version import APP_VERSION
 from flask import Flask, Response, abort, jsonify, render_template, request, send_file, stream_with_context
-from surveillance_recordings import list_recordings, recording_details, recordings_directory, resolve_recording
+from surveillance_recordings import (
+    list_recordings,
+    recording_details,
+    recordings_directory,
+    resolve_recording,
+    resolve_recording_sidecar,
+)
 
 
 def _launch_start_script() -> None:
@@ -112,6 +118,14 @@ def create_app(engine: Any) -> Flask:
         return send_file(path, mimetype="video/mp4", as_attachment=False,
                          download_name=path.name, conditional=True, max_age=0)
 
+    @app.get("/api/recordings/<path:filename>/evidence")
+    def recording_evidence(filename: str) -> Response:
+        path = resolve_recording_sidecar(configured_recordings_directory(), filename, ".jpg")
+        if path is None:
+            abort(404)
+        return send_file(path, mimetype="image/jpeg", as_attachment=False,
+                         download_name=path.name, conditional=True, max_age=0)
+
     @app.delete("/api/recordings/<path:filename>")
     def delete_recording(filename: str) -> Any:
         if request.headers.get("X-Requested-With") != "XMLHttpRequest":
@@ -122,6 +136,10 @@ def create_app(engine: Any) -> Flask:
         archive_path = path.parent / ".originals" / path.name
         try:
             has_archived_original = archive_path.is_file() and os.path.samefile(path, archive_path)
+            for extension in (".jpg", ".txt"):
+                sidecar = resolve_recording_sidecar(path.parent, filename, extension)
+                if sidecar is not None:
+                    sidecar.unlink()
             path.unlink()
             if has_archived_original:
                 archive_path.unlink(missing_ok=True)

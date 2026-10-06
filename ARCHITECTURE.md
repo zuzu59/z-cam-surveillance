@@ -1,6 +1,6 @@
 # Architecture de z-cam-surveillance
 
-> Documentation de l’implémentation observée en version 0.0.6.
+> Documentation de l’implémentation observée en version 0.0.7.
 > L’application exécute l’analyse et le serveur vidéo sur le même hôte.
 
 ## 1. Mission et limites
@@ -154,7 +154,12 @@ la source temporaire est préservée et publiée comme solution de repli ; elle
 peut être moins compatible avec les navigateurs.
 
 Les fichiers sont nommés avec la date et l’heure, puis placés dans le
-dossier configuré, `captures/` par défaut.
+dossier configuré, `captures/` par défaut. Chaque clip possède également un
+`.jpg` du premier instant détecté, annoté avec les cadres verts, et un `.txt`
+contenant les labels distincts observés pendant l’événement. Ces deux fichiers
+reprennent exactement le nom du MP4 (seule l’extension change). Le lecteur
+associe l’image et les labels au clip sélectionné; leur suppression accompagne
+celle du MP4.
 
 ## 7. Configuration et persistance
 

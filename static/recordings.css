@@ -54,6 +54,13 @@
 .player-empty strong { color: #e0e7eb; font-size: 12px; font-weight: 600; }
 .player-empty > span:last-child { max-width: 290px; font-size: 10px; line-height: 1.5; }
 .empty-play { width: 40px; height: 40px; display: grid; place-items: center; margin-bottom: 3px; padding-left: 2px; border: 1px solid #34404a; border-radius: 50%; background: #12181e; color: #a4e8c3; font-size: 12px; }
+.event-evidence { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 34%); align-items: center; gap: 14px; padding: 13px 15px; border-bottom: 1px solid var(--border-soft); background: #0d1217; }
+.event-evidence h3 { margin: 0; color: #e3e9ed; font-size: 11px; font-weight: 650; }
+.event-evidence p { margin: 5px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.event-evidence img { display: block; width: 100%; max-height: 190px; aspect-ratio: 16 / 9; object-fit: contain; border: 1px solid #34404a; border-radius: 6px; background: #070a0d; }
+.event-evidence img[hidden] { display: none; }
+.evidence-labels { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.evidence-label { padding: 4px 8px; border: 1px solid #285540; border-radius: 999px; background: #14251d; color: #b8ebcf; font-size: 10px; font-weight: 600; }
 .playback-toolbar { min-height: 61px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 9px 14px; border-bottom: 1px solid var(--border-soft); }
 .file-navigation { display: flex; align-items: center; gap: 5px; }
 .transport-button { min-height: 38px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 9px; border: 1px solid #34404a; border-radius: 6px; background: #171e26; color: #d3dce2; font-size: 10px; cursor: pointer; }
@@ -88,6 +95,6 @@
 .viewer-feedback.error { color: #ff9c9c; }
 .viewer-feedback.success { color: #9fe3bd; }
 @media (max-width: 1050px) { .recording-layout { grid-template-columns: minmax(255px, 310px) minmax(0, 1fr); gap: 12px; } .details-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 760px) { .recording-layout { grid-template-columns: minmax(0, 1fr); } .recording-list { max-height: 38vh; } .recording-viewer { grid-row: 2; } .recording-library { grid-row: 1; } }
+@media (max-width: 760px) { .recording-layout { grid-template-columns: minmax(0, 1fr); } .event-evidence { grid-template-columns: minmax(0, 1fr); } .event-evidence img { grid-row: 1; max-width: 460px; } .recording-list { max-height: 38vh; } .recording-viewer { grid-row: 2; } .recording-library { grid-row: 1; } }
 @media (max-width: 560px) { .recordings-workspace { padding-right: 12px; padding-left: 12px; } .recordings-heading { gap: 9px; } .recording-folder { max-width: 100%; } .recording-layout { gap: 11px; } .library-heading { min-height: 62px; padding: 11px 12px; } .search-control { margin: 10px 10px 8px; } .recording-list { min-height: 86px; max-height: 32vh; } .viewer-heading { min-height: 65px; gap: 8px; padding: 10px; } .selected-file-heading { gap: 8px; } .file-type-icon { width: 28px; height: 28px; } .viewer-heading h2 { max-width: min(48vw, 280px); font-size: 12px; } .delete-trigger { width: 38px; min-width: 38px; padding: 0; } .delete-trigger span { display: none; } .player-stage { min-height: 190px; } .playback-toolbar { align-items: flex-start; flex-direction: column; gap: 9px; padding: 10px; } .file-navigation { width: 100%; justify-content: space-between; } .transport-button { min-width: 115px; } .speed-control { width: 100%; justify-content: space-between; } .speed-options button { min-width: 54px; } .delete-confirmation { align-items: stretch; flex-direction: column; gap: 10px; padding: 11px; } .confirmation-actions { justify-content: flex-end; } .details-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .file-details { padding: 12px 10px 8px; } .details-grid > div { padding: 9px 8px; } }
 @media (prefers-reduced-motion: reduce) { .recordings-page *, .recordings-page *::before, .recordings-page *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }
