@@ -40,7 +40,7 @@
       <fieldset class="config-section"><legend>Détection et enregistrement</legend>
         <div class="config-grid">
           <div class="field-group"><label for="threshold">Seuil de confiance (0,05–0,99)</label><input id="threshold" type="number" min="0.05" max="0.99" step="0.01" required><p class="field-hint">Un seuil plus bas accepte davantage de détections.</p></div>
-          <div class="field-group"><label for="interval">Cadence d’analyse · secondes (0,2–30)</label><input id="interval" type="number" min="0.2" max="30" step="0.1" required></div>
+          <div class="field-group"><label for="interval">Cadence d’analyse · secondes (0,2–30)</label><input id="interval" type="number" min="0.2" max="30" step="0.01" required></div>
           <div class="field-group"><label for="no-detection-seconds">Délai avant fermeture du clip · secondes (0–3600)</label><input id="no-detection-seconds" type="number" min="0" max="3600" step="1" required></div>
           <div class="field-group"><label class="check-row main-check"><input id="recording-enabled" type="checkbox"><span>Activer l’enregistrement événementiel MP4</span></label><p class="field-hint">Les clips utilisent le flux haute résolution.</p></div>
           <div class="field-group"><label for="output-dir">Dossier des enregistrements</label><input id="output-dir" type="text" required></div>

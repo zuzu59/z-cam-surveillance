@@ -7,7 +7,7 @@ Application web locale de surveillance RTSP et détection d’objets. Elle analy
 - **Détection** (`/`) : aperçu caméra, cadres, labels et état des flux/enregistrements.
 - **Configuration** (`/configuration`) : formulaire unique pour modifier l’ensemble des paramètres persistés.
 - **Enregistrements** (`/recordings`) : recherche instantanée dans les clips MP4, lecteur avec navigation et vitesses 1×/1,5×/2×, détails des fichiers et suppression confirmée.
-- **Aide** (`/help`) et **À propos** (`/about`). La version est `0.0.5`; elle ne s’incrémente pas automatiquement et n’est incrémentée que sur demande du propriétaire.
+- **Aide** (`/help`) et **À propos** (`/about`). La version est `0.0.6`; elle ne s’incrémente pas automatiquement et n’est incrémentée que sur demande du propriétaire.
 
 La bibliothèque **Enregistrements** parcourt uniquement les fichiers MP4 du dossier de sortie configuré; sa recherche filtre les noms et dates sur toutes les pages. Les métadonnées techniques (durée, résolution, codec, cadence et débit) sont lues à la demande avec `ffprobe` lorsqu’il est disponible. L’API ne révèle jamais le chemin absolu du dossier; la lecture supporte les requêtes HTTP Range du navigateur. La suppression demande une confirmation et efface définitivement le clip sélectionné.
 

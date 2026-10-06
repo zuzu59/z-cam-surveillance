@@ -1,6 +1,6 @@
 # Architecture de z-cam-surveillance
 
-> Documentation de l’implémentation observée en version 0.0.5.
+> Documentation de l’implémentation observée en version 0.0.6.
 > L’application exécute l’analyse et le serveur vidéo sur le même hôte.
 
 ## 1. Mission et limites
@@ -290,7 +290,7 @@ suppression sûre et l’archivage des originaux.
 
 ## 12. Captures de démonstration
 
-Les captures montrent l’interface 0.0.5 avec des données
+Les captures montrent l’interface 0.0.6 avec des données
 entièrement synthétiques. La scène et les clips sont générés pour la
 documentation. Aucun flux réel ni identifiant RTSP n’a été utilisé.
 

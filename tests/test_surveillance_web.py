@@ -50,7 +50,7 @@ class SurveillanceDashboardTests(unittest.TestCase):
         self.assertIn('id="enabled-labels"', config_page)
         self.assertIn('id="select-all-labels"', config_page)
         self.assertIn('id="clear-labels"', config_page)
-        self.assertEqual(APP_VERSION, "0.0.5")
+        self.assertEqual(APP_VERSION, "0.0.6")
         self.assertIn(APP_VERSION.encode(), self.client.get("/about").data)
         self.assertNotIn(b"MODE TEST", self.client.get("/").data)
 
@@ -99,15 +99,15 @@ class SurveillanceDashboardTests(unittest.TestCase):
 
     def test_settings_update_without_restart(self):
         response = self.client.post("/api/config", json={
-            "threshold": 0.65,
-            "interval": 0.7,
+            "threshold": 0.67,
+            "interval": 0.25,
             "no_detection_seconds": 6,
             "recording_enabled": False,
             "enabled_labels": ["bus"],
         })
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(self.engine.detector.threshold, 0.65)
-        self.assertEqual(self.engine.settings_snapshot()["interval"], 0.7)
+        self.assertEqual(self.engine.detector.threshold, 0.67)
+        self.assertEqual(self.engine.settings_snapshot()["interval"], 0.25)
         self.assertFalse(self.engine.settings_snapshot()["recording_enabled"])
         self.assertEqual(self.engine.detector.enabled_labels, frozenset({"bus"}))
 
@@ -164,7 +164,7 @@ class SurveillanceDashboardTests(unittest.TestCase):
                 "low_resolution_url": low_url,
                 "high_resolution_url": high_url,
                 "threshold": 0.66,
-                "interval": 0.8,
+                "interval": 0.82,
                 "no_detection_seconds": 12,
                 "recording_enabled": True,
             })
@@ -178,7 +178,8 @@ class SurveillanceDashboardTests(unittest.TestCase):
             saved = json.loads(config_path.read_text(encoding="utf-8"))
             self.assertEqual(saved["low_resolution_url"], low_url)
             self.assertEqual(saved["high_resolution_url"], high_url)
-            self.assertEqual(saved["interval"], 0.8)
+            self.assertEqual(saved["threshold"], 0.66)
+            self.assertEqual(saved["interval"], 0.82)
             self.assertEqual(stat.S_IMODE(config_path.stat().st_mode), 0o600)
             self.assertTrue(engine.settings_snapshot()["low_stream_configured"])
             self.assertTrue(engine.settings_snapshot()["high_stream_configured"])
