@@ -7,7 +7,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 import cv2
 from flask import Flask, jsonify, render_template_string, request
@@ -64,6 +64,19 @@ def generate_rtsp_variants(raw_url: str) -> list[str]:
     # Preserve a camera's path syntax, changing stream/channel values when present.
     paths.extend(_replace_stream_tokens(original_path, stream) for stream in (0, 1, 2))
     paths.extend([clean_path])
+
+    # Some cameras (including models using the user=..._password=... syntax)
+    # require credentials and stream selection inside the path, not in RTSP auth.
+    # Probe several stream indexes on the default channel so a bare host URL can
+    # discover the camera's main/sub streams without knowing its vendor beforehand.
+    if parsed.username is not None and parsed.password is not None:
+        path_username = quote(unquote(parsed.username), safe="")
+        path_password = quote(unquote(parsed.password), safe="")
+        paths.extend(
+            f"/user={path_username}_password={path_password}_channel=1_stream={stream}.sdp"
+            for stream in range(4)
+        )
+
     common = [
         "stream1", "stream2", "h264", "h265", "live/ch0", "live/ch1",
         "onvif1", "onvif2", "mpeg4", "Streaming/Channels/101",
