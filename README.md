@@ -62,15 +62,23 @@ Les champs URL restent volontairement vides au chargement pour ne pas exposer le
 
 Les options de lancement disponibles sont consultables avec `./start.sh --help`. Elles sont destinées au démarrage et leurs valeurs sont persistées dans le fichier JSON; évitez de fournir des URL contenant des identifiants dans l’historique du shell. Les réglages usuels se font depuis la page Configuration.
 
-## Scanner RTSP historique
+## Outils de découverte caméra
 
-Le scanner Flask reste disponible séparément :
+Le scanner de ports `scan_camera.py` prend une adresse IP, détecte les ports TCP ouverts (1–65535), identifie les protocoles courants et teste des chemins média possibles pour RTSP et HTTP(S). Les chemins non vérifiés restent cachés; seules les URLs qui renvoient effectivement un média valide sont affichées et copiables :
+
+```bash
+.venv/bin/python scan_camera.py
+```
+
+Il écoute par défaut sur `127.0.0.1:8092` et limite les cibles aux adresses IP privées ou locales. Pour y accéder depuis un autre appareil du LAN, définissez `SCAN_CAMERA_HOST` sur l’adresse réseau du serveur, par exemple `SCAN_CAMERA_HOST=192.168.0.92 .venv/bin/python scan_camera.py`; n’ouvrez cet accès que sur un réseau de confiance. Le scan des ports n’envoie que l’IP. Si vous lancez le test des médias, les URLs et identifiants sont transmis temporairement en HTTP non chiffré au scanner local pour vérifier les flux et médias; ils ne sont pas enregistrés. Utilisez cette option uniquement sur un réseau de confiance. Les résultats dépendent de la connectivité et des réponses réelles de la caméra au moment du test.
+
+Le scanner historique de chemins RTSP reste disponible séparément :
 
 ```bash
 .venv/bin/python tst_RTSP_flux.py
 ```
 
-Il écoute sur le port 8090. Il est destiné à un usage local/de confiance, pas à une exposition Internet directe.
+Il écoute sur le port 8090. Les deux outils sont destinés à un usage local/de confiance, pas à une exposition Internet directe.
 
 ## Confidentialité
 

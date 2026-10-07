@@ -70,8 +70,8 @@ def generate_rtsp_variants(raw_url: str) -> list[str]:
     # Probe several stream indexes on the default channel so a bare host URL can
     # discover the camera's main/sub streams without knowing its vendor beforehand.
     if parsed.username is not None and parsed.password is not None:
-        path_username = quote(unquote(parsed.username), safe="")
-        path_password = quote(unquote(parsed.password), safe="")
+        path_username = quote(unquote(parsed.username), safe="").replace("_", "%5F")
+        path_password = quote(unquote(parsed.password), safe="").replace("_", "%5F")
         paths.extend(
             f"/user={path_username}_password={path_password}_channel=1_stream={stream}.sdp"
             for stream in range(4)
@@ -82,6 +82,8 @@ def generate_rtsp_variants(raw_url: str) -> list[str]:
         "onvif1", "onvif2", "mpeg4", "Streaming/Channels/101",
         "Streaming/Channels/102", "cam/realmonitor?channel=1&subtype=0",
         "cam/realmonitor?channel=1&subtype=1", "live/main", "live/sub",
+        "live/ch00_0", "live/ch00_1", "h264/ch1/main/av_stream",
+        "h264/ch1/sub/av_stream", "ch1/main/av_stream", "ch1/sub/av_stream",
     ]
     paths.extend("/" + item for item in common)
 
