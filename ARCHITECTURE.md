@@ -94,10 +94,6 @@ captures/                         destination par défaut des enregistrements
 screenshots/                      captures de documentation et de tests
 ```
 
-`tst_RTSP_flux.py` est un ancien outil de diagnostic des chemins RTSP.
-Il sert Flask sur le port 8090 et n’est pas dans le cycle normal de
-l’application, qui utilise le port 8091.
-
 ## 5. Détection d’objets
 
 ### Entrées et résultats

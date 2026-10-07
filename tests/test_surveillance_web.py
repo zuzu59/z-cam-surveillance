@@ -50,7 +50,7 @@ class SurveillanceDashboardTests(unittest.TestCase):
         self.assertIn('id="enabled-labels"', config_page)
         self.assertIn('id="select-all-labels"', config_page)
         self.assertIn('id="clear-labels"', config_page)
-        self.assertEqual(APP_VERSION, "0.0.7")
+        self.assertEqual(APP_VERSION, "0.0.8")
         self.assertIn(APP_VERSION.encode(), self.client.get("/about").data)
         self.assertNotIn(b"MODE TEST", self.client.get("/").data)
 

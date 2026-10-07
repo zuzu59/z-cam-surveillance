@@ -1,13 +1,13 @@
 # z-cam-surveillance
 
-Application web locale de surveillance RTSP et détection d’objets. Elle analyse le flux basse résolution, affiche l’image et les labels détectés dans la page **Détection**, et peut enregistrer les événements depuis le flux haute résolution. Le scanner historique de chemins RTSP (`tst_RTSP_flux.py`) reste un outil séparé, disponible sur le port 8090.
+Application web locale de surveillance RTSP et détection d’objets. Elle analyse le flux basse résolution, affiche l’image et les labels détectés dans la page **Détection**, et peut enregistrer les événements depuis le flux haute résolution.
 
 ## Fonctionnalités web
 
 - **Détection** (`/`) : aperçu caméra, cadres, labels et état des flux/enregistrements.
 - **Configuration** (`/configuration`) : formulaire unique pour modifier l’ensemble des paramètres persistés.
 - **Enregistrements** (`/recordings`) : recherche instantanée dans les clips MP4, lecteur avec navigation et vitesses 1×/1,5×/2×, détails des fichiers et suppression confirmée.
-- **Aide** (`/help`) et **À propos** (`/about`). La version est `0.0.7`; elle ne s’incrémente pas automatiquement et n’est incrémentée que sur demande du propriétaire.
+- **Aide** (`/help`) et **À propos** (`/about`). La version est `0.0.8`; elle ne s’incrémente pas automatiquement et n’est incrémentée que sur demande du propriétaire.
 
 La bibliothèque **Enregistrements** parcourt uniquement les fichiers MP4 du dossier de sortie configuré; sa recherche filtre les noms et dates sur toutes les pages. Chaque clip s’accompagne d’un `.jpg` annoté avec les cadres verts de la première détection et d’un `.txt` listant les labels détectés pendant l’événement, tous deux avec le même nom de base que le MP4. Le lecteur affiche ces indices avec la vidéo. Les métadonnées techniques (durée, résolution, codec, cadence et débit) sont lues à la demande avec `ffprobe` lorsqu’il est disponible. L’API ne révèle jamais le chemin absolu du dossier; la lecture supporte les requêtes HTTP Range du navigateur. La suppression demande une confirmation et efface définitivement le clip et ses fichiers d’indices associés.
 
@@ -61,24 +61,6 @@ Les champs URL restent volontairement vides au chargement pour ne pas exposer le
 `surveillance.config.json` est ignoré par Git et ses permissions sont limitées au propriétaire (`0600`). Il contient les identifiants RTSP **en clair sur le disque** : protégez l’accès au compte système et ne copiez/committez jamais ce fichier. Les réponses de configuration ordinaires masquent les URL; le bouton œil de la page Configuration demande explicitement l’affichage d’une seule URL à la fois. Le serveur n’a pas d’authentification : toute personne pouvant accéder à l’application peut révéler ces identifiants, réservez donc son accès à un réseau et à des appareils de confiance. Le fichier d’exemple ne contient aucun identifiant.
 
 Les options de lancement disponibles sont consultables avec `./start.sh --help`. Elles sont destinées au démarrage et leurs valeurs sont persistées dans le fichier JSON; évitez de fournir des URL contenant des identifiants dans l’historique du shell. Les réglages usuels se font depuis la page Configuration.
-
-## Outils de découverte caméra
-
-Le scanner de ports `scan_camera.py` prend une adresse IP, détecte les ports TCP ouverts (1–65535), identifie les protocoles courants et teste des chemins média possibles pour RTSP et HTTP(S). Les chemins non vérifiés restent cachés; seules les URLs qui renvoient effectivement un média valide sont affichées et copiables :
-
-```bash
-.venv/bin/python scan_camera.py
-```
-
-Il écoute par défaut sur `127.0.0.1:8092` et limite les cibles aux adresses IP privées ou locales. Pour y accéder depuis un autre appareil du LAN, définissez `SCAN_CAMERA_HOST` sur l’adresse réseau du serveur, par exemple `SCAN_CAMERA_HOST=192.168.0.92 .venv/bin/python scan_camera.py`; n’ouvrez cet accès que sur un réseau de confiance. Le scan des ports n’envoie que l’IP. Si vous lancez le test des médias, les URLs et identifiants sont transmis temporairement en HTTP non chiffré au scanner local pour vérifier les flux et médias; ils ne sont pas enregistrés. Utilisez cette option uniquement sur un réseau de confiance. Les résultats dépendent de la connectivité et des réponses réelles de la caméra au moment du test.
-
-Le scanner historique de chemins RTSP reste disponible séparément :
-
-```bash
-.venv/bin/python tst_RTSP_flux.py
-```
-
-Il écoute sur le port 8090. Les deux outils sont destinés à un usage local/de confiance, pas à une exposition Internet directe.
 
 ## Confidentialité
 
