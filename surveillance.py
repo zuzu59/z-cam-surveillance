@@ -74,6 +74,7 @@ class _TrackedObject:
 @dataclass(frozen=True)
 class _BufferedFrame:
     timestamp: float
+    read_at: float
     jpeg: bytes
 
 
@@ -635,6 +636,7 @@ class Surveillance:
         writer_path: Path | None = None
         writer_frames = 0
         writer_started_at: float | None = None
+        writer_wall_start: float | None = None
         writer_start_timeline: float | None = None
         writer_fps = 0.0
         last_writer_frame: np.ndarray | None = None
@@ -658,7 +660,7 @@ class Surveillance:
             buffer_size = None
 
         def close_writer() -> None:
-            nonlocal writer, writer_path, writer_frames, writer_started_at
+            nonlocal writer, writer_path, writer_frames, writer_started_at, writer_wall_start
             nonlocal writer_start_timeline, writer_fps, last_writer_frame
             nonlocal evidence_frame, evidence_labels, published_path, writer_size
             current_writer = writer
@@ -674,6 +676,7 @@ class Surveillance:
             published_path = None
             writer_frames = 0
             writer_started_at = None
+            writer_wall_start = None
             writer_start_timeline = None
             writer_fps = 0.0
             last_writer_frame = None
@@ -724,14 +727,15 @@ class Surveillance:
                 clear_pre_roll()
 
         def write_scheduled_frame(frame: np.ndarray, timestamp: float,
-                                  frame_read_at: float, use_source_timestamps: bool) -> None:
-            nonlocal writer_frames, last_writer_frame, writer_start_timeline
-            if writer is None or writer_started_at is None or writer_start_timeline is None:
+                                  frame_read_at: float) -> None:
+            nonlocal writer_frames, last_writer_frame, writer_start_timeline, writer_wall_start
+            if (writer is None or writer_wall_start is None
+                    or writer_start_timeline is None):
                 return
-            wall_elapsed = max(0.0, frame_read_at - writer_started_at)
+            wall_elapsed = max(0.0, frame_read_at - writer_wall_start)
             timeline_elapsed = max(0.0, timestamp - writer_start_timeline)
-            elapsed = (timeline_elapsed if use_source_timestamps
-                       else max(wall_elapsed, timeline_elapsed))
+            # Honor queued-frame PTS, but never let a slow RTSP reader compress real time.
+            elapsed = max(wall_elapsed, timeline_elapsed)
             target_frames = max(
                 writer_frames, self._frame_target_for_elapsed(elapsed, writer_fps)
             )
@@ -739,9 +743,12 @@ class Surveillance:
             max_catch_up_frames = max(1, min(120, math.ceil(writer_fps)))
             if frames_to_write > max_catch_up_frames:
                 frames_to_write = max_catch_up_frames
-                writer_start_timeline = timestamp - max(
+                scheduled_elapsed = max(
                     0.0, writer_frames + frames_to_write - 1
                 ) / writer_fps
+                # Rebase both clocks together so a capped catch-up cannot repeat indefinitely.
+                writer_start_timeline = timestamp - scheduled_elapsed
+                writer_wall_start = frame_read_at - scheduled_elapsed
                 logging.warning("Retard d’horodatage du flux; cadence d’écriture recalée")
             for _ in range(max(0, frames_to_write - 1)):
                 writer.write(last_writer_frame if last_writer_frame is not None else frame)
@@ -752,7 +759,7 @@ class Surveillance:
 
         def start_writer(frame: np.ndarray, timestamp: float, frame_read_at: float) -> None:
             nonlocal writer, writer_path, published_path, writer_frames
-            nonlocal writer_started_at, writer_start_timeline, writer_fps
+            nonlocal writer_started_at, writer_wall_start, writer_start_timeline, writer_fps
             nonlocal last_writer_frame, evidence_frame, evidence_labels, writer_size
             buffered_frames = list(pre_roll)
             height, width = frame.shape[:2]
@@ -775,6 +782,8 @@ class Surveillance:
             writer_frames = 0
             last_writer_frame = None
             writer_started_at = time.monotonic()
+            writer_wall_start = (buffered_frames[0].read_at
+                                 if buffered_frames else writer_started_at)
             writer_start_timeline = (buffered_frames[0].timestamp
                                      if buffered_frames else timestamp)
             writer_size = (width, height)
@@ -782,15 +791,12 @@ class Surveillance:
                 self.recording_active = True
             logging.info("[ALERTE] Début de l'enregistrement avec pré-déclenchement: %s", filename)
 
-            use_source_timestamps = timestamp_mode in {"pts", "estimated"}
             for buffered in buffered_frames:
                 decoded = cv2.imdecode(np.frombuffer(buffered.jpeg, dtype=np.uint8), cv2.IMREAD_COLOR)
                 if decoded is not None:
-                    write_scheduled_frame(
-                        decoded, buffered.timestamp, writer_started_at, use_source_timestamps
-                    )
+                    write_scheduled_frame(decoded, buffered.timestamp, buffered.read_at)
             if not buffered_frames or buffered_frames[-1].timestamp != timestamp:
-                write_scheduled_frame(frame, timestamp, frame_read_at, use_source_timestamps)
+                write_scheduled_frame(frame, timestamp, frame_read_at)
 
         try:
             while not self.stop_event.is_set():
@@ -862,26 +868,38 @@ class Surveillance:
                     if stream_position is not None and (
                             last_timeline_timestamp is None
                             or stream_position > last_timeline_timestamp):
+                        if (last_timeline_timestamp is not None
+                                and stream_position - last_timeline_timestamp >= PRE_ROLL_SECONDS
+                                and pre_roll):
+                            # Keep buffered frames when a forward PTS jump would otherwise
+                            # evict the whole pre-roll window; treat the jump as discontinuous.
+                            offset = (stream_position - 1.0 / capture_fps
+                                      - pre_roll[-1].timestamp)
+                            pre_roll = deque(
+                                _BufferedFrame(item.timestamp + offset, item.read_at, item.jpeg)
+                                for item in pre_roll
+                            )
                         timestamp = stream_position
                     else:
-                        # CAP_PROP_POS_MSEC can be missing or stuck on live RTSP inputs.
-                        # Restart the ring on a synthetic frame-rate timeline rather than
-                        # mixing incomparable timestamps or draining it faster than real time.
+                        # CAP_PROP_POS_MSEC can be missing, repeated, or backward on RTSP.
+                        # Continue the existing ring on an estimated frame-rate timeline.
                         writer_elapsed = None
-                        if (writer is not None and writer_started_at is not None
+                        if (writer is not None and writer_wall_start is not None
                                 and writer_start_timeline is not None):
                             pts_elapsed = (
                                 0.0 if last_timeline_timestamp is None
                                 else max(0.0, last_timeline_timestamp - writer_start_timeline)
                             )
-                            wall_elapsed = max(0.0, frame_read_at - writer_started_at)
+                            wall_elapsed = max(0.0, frame_read_at - writer_wall_start)
                             writer_elapsed = max(pts_elapsed, wall_elapsed)
-                        clear_pre_roll()
-                        buffer_size = frame_size
                         timestamp_mode = "estimated"
-                        timestamp = frame_read_at
+                        timestamp = (
+                            last_timeline_timestamp + 1.0 / capture_fps
+                            if last_timeline_timestamp is not None else frame_read_at
+                        )
                         if writer_elapsed is not None:
                             writer_start_timeline = timestamp - writer_elapsed
+                            writer_wall_start = frame_read_at - writer_elapsed
                 elif last_timeline_timestamp is None:
                     timestamp = frame_read_at
                 else:
@@ -892,13 +910,14 @@ class Surveillance:
                     ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90]
                 )
                 if encoded_ok:
-                    pre_roll.append(_BufferedFrame(timestamp, encoded.tobytes()))
+                    pre_roll.append(_BufferedFrame(timestamp, frame_read_at, encoded.tobytes()))
                     cutoff = timestamp - PRE_ROLL_SECONDS
                     max_pre_roll_frames = max(
                         2, math.ceil(PRE_ROLL_SECONDS * capture_fps * 2) + 1
                     )
                     while pre_roll and (
                             pre_roll[0].timestamp < cutoff
+                            or frame_read_at - pre_roll[0].read_at > PRE_ROLL_SECONDS
                             or len(pre_roll) > max_pre_roll_frames):
                         pre_roll.popleft()
                 else:
@@ -915,10 +934,7 @@ class Surveillance:
                     close_writer()
                     logging.warning("Résolution haute du flux modifiée; clip fermé")
                 else:
-                    write_scheduled_frame(
-                        frame, timestamp, frame_read_at,
-                        timestamp_mode in {"pts", "estimated"},
-                    )
+                    write_scheduled_frame(frame, timestamp, frame_read_at)
         finally:
             close_writer()
             close_capture(clear_buffer=True)

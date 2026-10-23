@@ -149,21 +149,28 @@ nouvel objet actualise l’horloge de l’événement; après
 
 Le flux haute résolution demeure connecté tant que l’enregistrement est activé
 et qu’une URL haute résolution est configurée. Chaque image est temporairement
-compressée dans un tampon circulaire de deux secondes d’horodatage, avec une
-borne de sécurité d’environ quatre secondes d’images calculée depuis le FPS.
+compressée dans un tampon circulaire limité à deux secondes selon l’horodatage
+source et l’horloge monotone de lecture, avec une borne de sécurité d’environ
+quatre secondes d’images calculée depuis le FPS.
 Au déclenchement, le tampon est relu dans le clip avant les nouvelles images,
 ce qui inclut la période précédant le délai
 d’inférence sans écrire les périodes stationnaires sur disque. Les images du
-tampon sont encodées JPEG en mémoire; elles sont effacées lors d’une
-reconnexion ou d’un changement de résolution.
+tampon sont encodées JPEG en mémoire et conservent leur horodatage source ainsi
+que leur heure monotone de lecture; elles sont effacées lors d’une reconnexion
+ou d’un changement de résolution. En cas de PTS répétés ou incohérents, le moteur
+bascule sur une cadence estimée sans vider le tampon. Les sauts PTS qui
+supprimeraient toute la fenêtre sont normalisés afin de préserver les images
+pré-déclenchement disponibles.
 
-La planification des images utilise d’abord l’horodatage RTSP
-`CAP_PROP_POS_MSEC`. Si cette horloge est absente ou incohérente, le moteur
-estime le temps à partir du FPS et de l’ordre des images, ce qui évite que le
-tampon soit vidé plus vite que la cadence source. Il calcule les instants de
-sortie et répète la dernière image lorsque nécessaire pour conserver la cadence
-sans accélérer artificiellement la durée du clip. Un clip sans image est
-supprimé.
+La planification des images combine l’horodatage RTSP `CAP_PROP_POS_MSEC` et
+le temps monotone réel, en retenant le plus grand temps écoulé. Ainsi, les PTS
+préservent la cadence source lorsque OpenCV vide rapidement des images déjà en
+mémoire, tandis que le temps réel empêche d’accélérer la vidéo lorsque la lecture
+RTSP ou le décodage prend du retard. Si les PTS sont absents ou incohérents, le
+moteur estime la cadence depuis le FPS et l’ordre des images; après un rattrapage
+limité, il recale ensemble les deux horloges. Il répète la dernière image lorsque
+nécessaire et conserve ainsi une durée de lecture cohérente avec le temps écoulé.
+Un clip sans image est supprimé.
 
 OpenCV écrit d’abord un fichier temporaire en `mp4v`. À la fermeture, un
 travailleur distinct demande à FFmpeg une conversion H.264 en `yuv420p`.

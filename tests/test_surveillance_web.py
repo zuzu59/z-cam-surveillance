@@ -57,7 +57,7 @@ class SurveillanceDashboardTests(unittest.TestCase):
         self.assertIn('id="enabled-labels"', config_page)
         self.assertIn('id="select-all-labels"', config_page)
         self.assertIn('id="clear-labels"', config_page)
-        self.assertEqual(APP_VERSION, "0.0.9")
+        self.assertEqual(APP_VERSION, "0.0.10")
         self.assertIn(APP_VERSION.encode(), self.client.get("/about").data)
         self.assertNotIn(b"MODE TEST", self.client.get("/").data)
 
@@ -141,6 +141,18 @@ class SurveillanceDashboardTests(unittest.TestCase):
         self.assertEqual(tracker.update([moving_car_confirmed], 2.0, 5.0),
                          [moving_car_confirmed])
         self.assertEqual(tracker.update([moving_car_confirmed], 2.5, 5.0), [])
+
+    def test_moving_person_triggers_while_stationary_car_remains_detected(self):
+        tracker = ObjectMotionTracker()
+        parked_car = Detection("car", 0.91, (0.1, 0.1, 0.3, 0.3))
+        person_start = Detection("person", 0.94, (0.5, 0.1, 0.7, 0.3))
+        person_moving = Detection("person", 0.94, (0.56, 0.1, 0.76, 0.3))
+        person_confirmed = Detection("person", 0.94, (0.62, 0.1, 0.82, 0.3))
+
+        self.assertEqual(tracker.update([parked_car, person_start], 0.0, 5.0), [])
+        self.assertEqual(tracker.update([parked_car, person_moving], 0.5, 5.0), [])
+        self.assertEqual(tracker.update([parked_car, person_confirmed], 1.0, 5.0),
+                         [person_confirmed])
 
     def test_stationary_box_jitter_does_not_trigger_but_approach_size_change_does(self):
         tracker = ObjectMotionTracker()
@@ -399,6 +411,124 @@ class SurveillanceDashboardTests(unittest.TestCase):
             self.assertEqual(published_path.with_suffix(".txt").read_text(encoding="utf-8"), "person\n")
             self.assertFalse(engine.recording_active)
 
+    def test_slow_source_pts_do_not_make_video_play_faster_than_real_time(self):
+        with TemporaryDirectory() as output:
+            engine = Surveillance("rtsp://camera/low", SimpleNamespace(threshold=0.5),
+                                  0.5, 0.5, 0.0, Path(output),
+                                  high_resolution_url="rtsp://camera/high")
+            clock = [100.0]
+            written_frames = []
+
+            class HighResolutionCapture:
+                def __init__(self, _url, *_args):
+                    self.read_count = 0
+
+                def isOpened(self):
+                    return True
+
+                def read(self):
+                    self.read_count += 1
+                    clock[0] += 0.1
+                    if self.read_count == 51:
+                        with engine.lock:
+                            engine.record_requested = True
+                            engine.last_detection = clock[0]
+                        engine.stop_event.set()
+                    return True, np.full((48, 80, 3), self.read_count, dtype=np.uint8)
+
+                def get(self, prop):
+                    if prop == cv2.CAP_PROP_FPS:
+                        return 25.0
+                    if prop == cv2.CAP_PROP_POS_MSEC:
+                        # This fake source PTS is 0.04s/read while reads take 0.1s.
+                        return (self.read_count - 1) * 40.0
+                    return 0.0
+
+                def release(self):
+                    pass
+
+            class Writer:
+                def isOpened(self):
+                    return True
+
+                def write(self, frame):
+                    written_frames.append(frame.copy())
+
+                def release(self):
+                    pass
+
+            engine.last_detection = clock[0]
+            with patch("surveillance.time.monotonic", side_effect=lambda: clock[0]), \
+                    patch("surveillance.cv2.VideoCapture", side_effect=HighResolutionCapture), \
+                    patch("surveillance.cv2.VideoWriter", return_value=Writer()), \
+                    patch.object(engine, "_finalize_recording") as finalize_recording:
+                engine.recording_loop()
+                engine.media_transcoder.shutdown(wait=True)
+
+            self.assertGreaterEqual(len(written_frames), 48)
+            self.assertLessEqual(len(written_frames), 52)
+            self.assertGreater(int(written_frames[0][0, 0, 0]), 25)
+            self.assertLess(int(written_frames[0][0, 0, 0]), 36)
+            self.assertGreater(int(written_frames[-1][0, 0, 0]), 45)
+            finalize_recording.assert_called_once()
+
+    def test_slow_estimated_timeline_does_not_make_video_play_faster(self):
+        with TemporaryDirectory() as output:
+            engine = Surveillance("rtsp://camera/low", SimpleNamespace(threshold=0.5),
+                                  0.5, 0.5, 0.0, Path(output),
+                                  high_resolution_url="rtsp://camera/high")
+            clock = [100.0]
+            written_frames = []
+
+            class HighResolutionCapture:
+                def __init__(self, _url, *_args):
+                    self.read_count = 0
+
+                def isOpened(self):
+                    return True
+
+                def read(self):
+                    self.read_count += 1
+                    clock[0] += 0.1
+                    if self.read_count == 5:
+                        with engine.lock:
+                            engine.record_requested = True
+                            engine.last_detection = clock[0]
+                        engine.stop_event.set()
+                    return True, np.full((48, 80, 3), self.read_count, dtype=np.uint8)
+
+                def get(self, prop):
+                    if prop == cv2.CAP_PROP_FPS:
+                        return 25.0
+                    if prop == cv2.CAP_PROP_POS_MSEC:
+                        return float("nan")
+                    return 0.0
+
+                def release(self):
+                    pass
+
+            class Writer:
+                def isOpened(self):
+                    return True
+
+                def write(self, frame):
+                    written_frames.append(frame.copy())
+
+                def release(self):
+                    pass
+
+            engine.last_detection = clock[0]
+            with patch("surveillance.time.monotonic", side_effect=lambda: clock[0]), \
+                    patch("surveillance.cv2.VideoCapture", side_effect=HighResolutionCapture), \
+                    patch("surveillance.cv2.VideoWriter", return_value=Writer()), \
+                    patch.object(engine, "_finalize_recording") as finalize_recording:
+                engine.recording_loop()
+                engine.media_transcoder.shutdown(wait=True)
+
+            self.assertGreaterEqual(len(written_frames), 9)
+            self.assertLessEqual(len(written_frames), 10)
+            finalize_recording.assert_called_once()
+
     def test_repeated_pts_during_recording_rebases_clock_without_catch_up_burst(self):
         with TemporaryDirectory() as output:
             engine = Surveillance("rtsp://camera/low", SimpleNamespace(threshold=0.5),
@@ -468,6 +598,66 @@ class SurveillanceDashboardTests(unittest.TestCase):
             self.assertLessEqual(writers[0].written, 35)
             finalize_recording.assert_called_once()
 
+    def test_forward_pts_jump_preserves_pre_roll_for_event(self):
+        with TemporaryDirectory() as output:
+            engine = Surveillance("rtsp://camera/low", SimpleNamespace(threshold=0.5),
+                                  0.5, 0.5, 0.0, Path(output),
+                                  high_resolution_url="rtsp://camera/high")
+            clock = [100.0]
+            written_frames = []
+
+            class HighResolutionCapture:
+                def __init__(self, _url, *_args):
+                    self.read_count = 0
+
+                def isOpened(self):
+                    return True
+
+                def read(self):
+                    self.read_count += 1
+                    clock[0] += 0.1
+                    if self.read_count == 31:
+                        with engine.lock:
+                            engine.record_requested = True
+                            engine.last_detection = clock[0]
+                        engine.stop_event.set()
+                    return True, np.full((48, 80, 3), self.read_count, dtype=np.uint8)
+
+                def get(self, prop):
+                    if prop == cv2.CAP_PROP_FPS:
+                        return 10.0
+                    if prop == cv2.CAP_PROP_POS_MSEC:
+                        if self.read_count == 31:
+                            return 10_000.0
+                        return (self.read_count - 1) * 100.0
+                    return 0.0
+
+                def release(self):
+                    pass
+
+            class Writer:
+                def isOpened(self):
+                    return True
+
+                def write(self, frame):
+                    written_frames.append(frame.copy())
+
+                def release(self):
+                    pass
+
+            with patch("surveillance.time.monotonic", side_effect=lambda: clock[0]), \
+                    patch("surveillance.cv2.VideoCapture", side_effect=HighResolutionCapture), \
+                    patch("surveillance.cv2.VideoWriter", return_value=Writer()), \
+                    patch.object(engine, "_finalize_recording") as finalize_recording:
+                engine.recording_loop()
+                engine.media_transcoder.shutdown(wait=True)
+
+            self.assertGreaterEqual(len(written_frames), 19)
+            self.assertLessEqual(len(written_frames), 22)
+            self.assertLess(int(written_frames[0][0, 0, 0]), 15)
+            self.assertGreater(int(written_frames[-1][0, 0, 0]), 25)
+            finalize_recording.assert_called_once()
+
     def test_recording_estimates_two_second_pre_roll_when_source_pts_are_missing(self):
         with TemporaryDirectory() as output:
             engine = Surveillance("rtsp://camera/low", SimpleNamespace(threshold=0.5),
@@ -534,8 +724,9 @@ class SurveillanceDashboardTests(unittest.TestCase):
             finalize_recording.assert_called_once()
 
     def test_inference_encodes_preview_and_only_records_new_or_moving_objects(self):
+        parked_car = Detection("car", 0.91, (0.1, 0.2, 0.8, 0.7))
         person = Detection("person", 0.91, (0.1, 0.2, 0.8, 0.7))
-        detections = [person]
+        detections = [parked_car]
         detector = SimpleNamespace(threshold=0.5, detect=lambda _frame: list(detections))
         engine = Surveillance("", detector, 0.5, 0.2, 1.0, Path("captures"))
         engine.latest_frame = np.zeros((48, 80, 3), dtype=np.uint8)
@@ -549,17 +740,17 @@ class SurveillanceDashboardTests(unittest.TestCase):
                 sequence, jpeg = engine.preview_snapshot()
             self.assertGreater(sequence, 0)
             self.assertTrue(jpeg.startswith(b"\xff\xd8"))
-            self.assertEqual(engine.status_snapshot()["detections"][0]["label"], "person")
+            self.assertEqual(engine.status_snapshot()["detections"][0]["label"], "car")
             self.assertFalse(engine.status_snapshot()["recording_requested"])
 
-            detections.append(Detection("car", 0.91, (0.1, 0.2, 0.8, 0.7)))
+            detections.append(person)
             deadline = time.monotonic() + 2
             while not engine.status_snapshot()["recording_requested"] and time.monotonic() < deadline:
                 time.sleep(0.02)
             state = engine.status_snapshot()
             self.assertTrue(state["recording_requested"])
-            self.assertEqual([item["label"] for item in state["detections"]], ["person", "car"])
-            self.assertEqual(engine.recording_evidence_labels, {"car": 0.91})
+            self.assertEqual([item["label"] for item in state["detections"]], ["car", "person"])
+            self.assertEqual(engine.recording_evidence_labels, {"person": 0.91})
             self.assertEqual(engine.recording_evidence_frame.shape, (48, 80, 3))
             self.assertTupleEqual(tuple(engine.recording_evidence_frame[5, 16]), (0, 255, 0))
             last_motion_detection = engine.last_detection
