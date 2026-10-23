@@ -127,8 +127,9 @@ chien et chat.
    dernière image disponible.
 2. **Inférence** : analyse à la cadence configurée, met à jour l’état,
    encode l’image d’aperçu en JPEG et actualise les détections.
-3. **Capture haute résolution** : reste inactive jusqu’à un événement,
-   puis écrit les images du clip.
+3. **Capture haute résolution** : lit le flux en continu et conserve un tampon
+   circulaire des deux dernières secondes; n’écrit les images sur disque qu’à
+   partir d’un déclenchement.
 
 Les pertes de flux déclenchent des tentatives de reconnexion avec temporisation
 progressive, bornée entre 1 et 30 secondes. La cadence d’analyse est
@@ -136,16 +137,33 @@ configurable indépendamment de la fréquence d’acquisition.
 
 ## 6. Enregistrement des événements
 
-Une détection appartenant à une classe activée demande un enregistrement si
-la fonction est activée. Le flux haute résolution n’est ouvert qu’à ce
-moment-là. Le clip continue tant qu’il y a des détections ; après la
-dernière, `no_detection_seconds` détermine le délai avant fermeture.
+Les détections appartenant aux classes activées restent affichées, mais
+l’enregistrement se déclenche uniquement sur un nouvel objet ou un déplacement
+confirmé. À la première analyse, les objets déjà visibles établissent la scène
+de référence et ne déclenchent pas à eux seuls. Le suivi associe les boîtes
+entre images et confirme le déplacement sur plusieurs analyses, sans arrêter
+la détection : un nouvel objet peut donc déclencher un événement même si un
+objet stationnaire reste dans le champ. Le dernier mouvement confirmé ou
+nouvel objet actualise l’horloge de l’événement; après
+`no_detection_seconds` sans autre événement, le clip se ferme.
+
+Le flux haute résolution demeure connecté tant que l’enregistrement est activé
+et qu’une URL haute résolution est configurée. Chaque image est temporairement
+compressée dans un tampon circulaire de deux secondes d’horodatage, avec une
+borne de sécurité d’environ quatre secondes d’images calculée depuis le FPS.
+Au déclenchement, le tampon est relu dans le clip avant les nouvelles images,
+ce qui inclut la période précédant le délai
+d’inférence sans écrire les périodes stationnaires sur disque. Les images du
+tampon sont encodées JPEG en mémoire; elles sont effacées lors d’une
+reconnexion ou d’un changement de résolution.
 
 La planification des images utilise d’abord l’horodatage RTSP
 `CAP_PROP_POS_MSEC`. Si cette horloge est absente ou incohérente, le moteur
-utilise une horloge monotone. Il calcule les instants de sortie et répète la
-dernière image lorsque nécessaire pour conserver la cadence sans accélérer
-artificiellement la durée du clip. Un clip sans image est supprimé.
+estime le temps à partir du FPS et de l’ordre des images, ce qui évite que le
+tampon soit vidé plus vite que la cadence source. Il calcule les instants de
+sortie et répète la dernière image lorsque nécessaire pour conserver la cadence
+sans accélérer artificiellement la durée du clip. Un clip sans image est
+supprimé.
 
 OpenCV écrit d’abord un fichier temporaire en `mp4v`. À la fermeture, un
 travailleur distinct demande à FFmpeg une conversion H.264 en `yuv420p`.
@@ -155,8 +173,9 @@ peut être moins compatible avec les navigateurs.
 
 Les fichiers sont nommés avec la date et l’heure, puis placés dans le
 dossier configuré, `captures/` par défaut. Chaque clip possède également un
-`.jpg` du premier instant détecté, annoté avec les cadres verts, et un `.txt`
-contenant les labels distincts observés pendant l’événement. Ces deux fichiers
+`.jpg` du premier nouvel objet ou mouvement confirmé, annoté avec les cadres
+verts, et un `.txt` contenant les labels des déclenchements pendant l’événement.
+Ces deux fichiers
 reprennent exactement le nom du MP4 (seule l’extension change). Le lecteur
 associe l’image et les labels au clip sélectionné; leur suppression accompagne
 celle du MP4.

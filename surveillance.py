@@ -8,6 +8,7 @@ import math
 import signal
 import threading
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
@@ -39,6 +40,7 @@ except ImportError:
             Interpreter = None  # type: ignore[assignment,misc]
 
 TARGETS = set(DEFAULT_ENABLED_LABELS)
+PRE_ROLL_SECONDS = 2.0
 COCO_LABELS = [
     "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
     "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog",
@@ -58,6 +60,129 @@ class Detection:
     confidence: float
     # Normalized coordinates: (y_min, x_min, y_max, x_max).
     box: tuple[float, float, float, float]
+
+
+@dataclass
+class _TrackedObject:
+    label: str
+    box: tuple[float, float, float, float]
+    last_seen: float
+    motion_reference_box: tuple[float, float, float, float]
+    pending_motion: bool = False
+
+
+@dataclass(frozen=True)
+class _BufferedFrame:
+    timestamp: float
+    jpeg: bytes
+
+
+class ObjectMotionTracker:
+    """Associate detections across inference samples and report confirmed movement."""
+
+    def __init__(self) -> None:
+        self._tracks: list[_TrackedObject] = []
+        self._baseline_initialized = False
+
+    def reset(self) -> None:
+        self._tracks.clear()
+        self._baseline_initialized = False
+
+    @staticmethod
+    def _center(box: tuple[float, float, float, float]) -> tuple[float, float]:
+        y_min, x_min, y_max, x_max = box
+        return (x_min + x_max) / 2, (y_min + y_max) / 2
+
+    @staticmethod
+    def _size(box: tuple[float, float, float, float]) -> tuple[float, float]:
+        y_min, x_min, y_max, x_max = box
+        return max(0.0, x_max - x_min), max(0.0, y_max - y_min)
+
+    @staticmethod
+    def _iou(first: tuple[float, float, float, float],
+             second: tuple[float, float, float, float]) -> float:
+        y_min = max(first[0], second[0])
+        x_min = max(first[1], second[1])
+        y_max = min(first[2], second[2])
+        x_max = min(first[3], second[3])
+        intersection = max(0.0, y_max - y_min) * max(0.0, x_max - x_min)
+        first_area = max(0.0, first[2] - first[0]) * max(0.0, first[3] - first[1])
+        second_area = max(0.0, second[2] - second[0]) * max(0.0, second[3] - second[1])
+        union = first_area + second_area - intersection
+        return intersection / union if union > 0 else 0.0
+
+    def update(self, detections: list[Detection], now: float,
+               max_missing_seconds: float) -> list[Detection]:
+        initializing = not self._baseline_initialized
+        self._tracks = [track for track in self._tracks
+                        if now - track.last_seen <= max_missing_seconds]
+        candidates: list[tuple[int, int, float, float]] = []
+        for detection_index, detection in enumerate(detections):
+            detection_center = self._center(detection.box)
+            detection_width, detection_height = self._size(detection.box)
+            for track_index, track in enumerate(self._tracks):
+                if track.label != detection.label:
+                    continue
+                track_center = self._center(track.box)
+                distance = max(abs(detection_center[0] - track_center[0]),
+                               abs(detection_center[1] - track_center[1]))
+                track_width, track_height = self._size(track.box)
+                match_limit = min(0.35, max(
+                    0.08, 1.25 * max(detection_width, detection_height,
+                                     track_width, track_height),
+                ))
+                overlap = self._iou(track.box, detection.box)
+                if overlap > 0 or distance <= match_limit:
+                    candidates.append((detection_index, track_index,
+                                       0.0 if overlap >= 0.1 else 1.0,
+                                       distance / match_limit - overlap))
+
+        assignments: dict[int, int] = {}
+        used_tracks: set[int] = set()
+        for detection_index, track_index, overlap_priority, distance_cost in sorted(candidates,
+                key=lambda pair: (pair[2], pair[3])):
+            if detection_index not in assignments and track_index not in used_tracks:
+                assignments[detection_index] = track_index
+                used_tracks.add(track_index)
+
+        moving: list[Detection] = []
+        for detection_index, detection in enumerate(detections):
+            track_index = assignments.get(detection_index)
+            if track_index is None:
+                self._tracks.append(_TrackedObject(
+                    detection.label, detection.box, now, detection.box
+                ))
+                if not initializing:
+                    moving.append(detection)
+                continue
+            track = self._tracks[track_index]
+            anchor_center = self._center(track.motion_reference_box)
+            current_center = self._center(detection.box)
+            anchor_width, anchor_height = self._size(track.motion_reference_box)
+            current_width, current_height = self._size(detection.box)
+            threshold_x = max(0.015, 0.25 * max(anchor_width, current_width))
+            threshold_y = max(0.015, 0.25 * max(anchor_height, current_height))
+            threshold_width = max(0.02, 0.25 * max(anchor_width, current_width))
+            threshold_height = max(0.02, 0.25 * max(anchor_height, current_height))
+            displaced = (
+                abs(current_center[0] - anchor_center[0]) >= threshold_x
+                or abs(current_center[1] - anchor_center[1]) >= threshold_y
+                or abs(current_width - anchor_width) >= threshold_width
+                or abs(current_height - anchor_height) >= threshold_height
+            )
+            if displaced:
+                if track.pending_motion:
+                    moving.append(detection)
+                    track.motion_reference_box = detection.box
+                    track.pending_motion = False
+                else:
+                    track.pending_motion = True
+            else:
+                track.pending_motion = False
+            track.box = detection.box
+            track.last_seen = now
+        self._baseline_initialized = True
+        return moving
 
 
 def load_labels(path: str | None) -> list[str]:
@@ -159,6 +284,7 @@ class Surveillance:
         self.config.setdefault("enabled_labels", list(DEFAULT_ENABLED_LABELS))
         self.config["enabled_labels"] = list(self.config["enabled_labels"])
         self.detector.enabled_labels = frozenset(self.config["enabled_labels"])
+        self.motion_tracker = ObjectMotionTracker()
         self.startup_config = self.config.copy()
         self.pending_restart_fields: set[str] = set()
         self.stop_event = threading.Event()
@@ -315,6 +441,7 @@ class Surveillance:
             high_url = candidate["high_resolution_url"]
             low_changed = low_url != self.low_resolution_url
             high_changed = high_url != self.high_resolution_url
+            labels_changed = candidate["enabled_labels"] != self.config["enabled_labels"]
             self.config = candidate
             self.pending_restart_fields = {
                 field for field in ("model", "labels", "host", "port")
@@ -329,6 +456,8 @@ class Surveillance:
             self.output_dir = Path(candidate["output_dir"])
             self.detector.threshold = self.threshold
             self.detector.enabled_labels = frozenset(candidate["enabled_labels"])
+            if low_changed or labels_changed:
+                self.motion_tracker.reset()
             if low_changed:
                 self.latest_frame = None
                 self.latest_detections = []
@@ -500,25 +629,38 @@ class Surveillance:
                 capture.release()
 
     def recording_loop(self) -> None:
+        """Continuously buffer high-resolution frames; write disk clips only for events."""
         capture: Any = None
         writer: Any = None
         writer_path: Path | None = None
         writer_frames = 0
         writer_started_at: float | None = None
-        writer_start_stream_position: float | None = None
+        writer_start_timeline: float | None = None
         writer_fps = 0.0
         last_writer_frame: np.ndarray | None = None
         evidence_frame: np.ndarray | None = None
         evidence_labels: dict[str, float] = {}
         published_path: Path | None = None
-        last_size: tuple[int, int] | None = None
+        writer_size: tuple[int, int] | None = None
+        buffer_size: tuple[int, int] | None = None
+        pre_roll: deque[_BufferedFrame] = deque()
+        timestamp_mode: str | None = None
+        last_timeline_timestamp: float | None = None
+        capture_fps = 10.0
         reconnect_delay = 1.0
         warned_missing_source = False
 
+        def clear_pre_roll() -> None:
+            nonlocal timestamp_mode, last_timeline_timestamp, buffer_size
+            pre_roll.clear()
+            timestamp_mode = None
+            last_timeline_timestamp = None
+            buffer_size = None
+
         def close_writer() -> None:
             nonlocal writer, writer_path, writer_frames, writer_started_at
-            nonlocal writer_start_stream_position, writer_fps, last_writer_frame
-            nonlocal evidence_frame, evidence_labels, published_path, last_size
+            nonlocal writer_start_timeline, writer_fps, last_writer_frame
+            nonlocal evidence_frame, evidence_labels, published_path, writer_size
             current_writer = writer
             current_path = writer_path
             current_published_path = published_path
@@ -532,12 +674,12 @@ class Surveillance:
             published_path = None
             writer_frames = 0
             writer_started_at = None
-            writer_start_stream_position = None
+            writer_start_timeline = None
             writer_fps = 0.0
             last_writer_frame = None
             evidence_frame = None
             evidence_labels = {}
-            last_size = None
+            writer_size = None
             if current_writer is not None:
                 current_writer.release()
                 if current_frames and current_started_at is not None and current_fps > 0:
@@ -572,37 +714,108 @@ class Surveillance:
                     self.recording_evidence_labels = {}
                     self.recording_active = False
 
-        def close_capture() -> None:
-            nonlocal capture
+        def close_capture(clear_buffer: bool = False) -> None:
+            nonlocal capture, capture_fps
             if capture is not None:
                 capture.release()
                 capture = None
+            capture_fps = 10.0
+            if clear_buffer:
+                clear_pre_roll()
+
+        def write_scheduled_frame(frame: np.ndarray, timestamp: float,
+                                  frame_read_at: float, use_source_timestamps: bool) -> None:
+            nonlocal writer_frames, last_writer_frame, writer_start_timeline
+            if writer is None or writer_started_at is None or writer_start_timeline is None:
+                return
+            wall_elapsed = max(0.0, frame_read_at - writer_started_at)
+            timeline_elapsed = max(0.0, timestamp - writer_start_timeline)
+            elapsed = (timeline_elapsed if use_source_timestamps
+                       else max(wall_elapsed, timeline_elapsed))
+            target_frames = max(
+                writer_frames, self._frame_target_for_elapsed(elapsed, writer_fps)
+            )
+            frames_to_write = max(0, target_frames - writer_frames)
+            max_catch_up_frames = max(1, min(120, math.ceil(writer_fps)))
+            if frames_to_write > max_catch_up_frames:
+                frames_to_write = max_catch_up_frames
+                writer_start_timeline = timestamp - max(
+                    0.0, writer_frames + frames_to_write - 1
+                ) / writer_fps
+                logging.warning("Retard d’horodatage du flux; cadence d’écriture recalée")
+            for _ in range(max(0, frames_to_write - 1)):
+                writer.write(last_writer_frame if last_writer_frame is not None else frame)
+            if frames_to_write:
+                writer.write(frame)
+                writer_frames += frames_to_write
+                last_writer_frame = frame
+
+        def start_writer(frame: np.ndarray, timestamp: float, frame_read_at: float) -> None:
+            nonlocal writer, writer_path, published_path, writer_frames
+            nonlocal writer_started_at, writer_start_timeline, writer_fps
+            nonlocal last_writer_frame, evidence_frame, evidence_labels, writer_size
+            buffered_frames = list(pre_roll)
+            height, width = frame.shape[:2]
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            filename = self.output_dir / f"{datetime.now():%Y%m%d_%H%M%S_%f}.mp4"
+            fps = capture.get(cv2.CAP_PROP_FPS)
+            writer_fps = float(fps) if math.isfinite(fps) and fps > 0 else 10.0
+            writer_path = filename.with_name(f".{filename.stem}.recording.mp4")
+            published_path = filename
+            with self.lock:
+                evidence_frame = (None if self.recording_evidence_frame is None
+                                  else self.recording_evidence_frame.copy())
+                evidence_labels = self.recording_evidence_labels.copy()
+            writer = cv2.VideoWriter(str(writer_path), cv2.VideoWriter_fourcc(*"mp4v"),
+                                     writer_fps, (width, height))
+            if not writer.isOpened():
+                logging.error("Impossible de créer le MP4 haute résolution (%dx%d)", width, height)
+                close_writer()
+                return
+            writer_frames = 0
+            last_writer_frame = None
+            writer_started_at = time.monotonic()
+            writer_start_timeline = (buffered_frames[0].timestamp
+                                     if buffered_frames else timestamp)
+            writer_size = (width, height)
+            with self.lock:
+                self.recording_active = True
+            logging.info("[ALERTE] Début de l'enregistrement avec pré-déclenchement: %s", filename)
+
+            use_source_timestamps = timestamp_mode in {"pts", "estimated"}
+            for buffered in buffered_frames:
+                decoded = cv2.imdecode(np.frombuffer(buffered.jpeg, dtype=np.uint8), cv2.IMREAD_COLOR)
+                if decoded is not None:
+                    write_scheduled_frame(
+                        decoded, buffered.timestamp, writer_started_at, use_source_timestamps
+                    )
+            if not buffered_frames or buffered_frames[-1].timestamp != timestamp:
+                write_scheduled_frame(frame, timestamp, frame_read_at, use_source_timestamps)
 
         try:
             while not self.stop_event.is_set():
                 if self.recording_reconnect_event.is_set():
                     self.recording_reconnect_event.clear()
                     close_writer()
-                    close_capture()
+                    close_capture(clear_buffer=True)
                 with self.lock:
-                    should_record = self._should_record_unlocked()
                     stream_url = self.high_resolution_url
-                if not should_record:
+                    recording_enabled = self.recording_enabled
+                if not recording_enabled or not stream_url:
                     close_writer()
-                    close_capture()
+                    close_capture(clear_buffer=True)
+                    if not stream_url and recording_enabled and not warned_missing_source:
+                        logging.warning("Flux haute résolution non configuré; enregistrement impossible")
+                        warned_missing_source = True
+                    elif stream_url:
+                        warned_missing_source = False
                     self.recording_wakeup_event.wait(0.25)
                     self.recording_wakeup_event.clear()
                     continue
-                if not stream_url:
-                    if not warned_missing_source:
-                        logging.warning("Flux haute résolution non configuré; enregistrement impossible")
-                        warned_missing_source = True
-                    self.stop_event.wait(0.25)
-                    continue
                 warned_missing_source = False
                 if capture is None or not capture.isOpened():
-                    close_capture()
-                    logging.info("Connexion au flux haute résolution pour l'enregistrement…")
+                    close_capture(clear_buffer=True)
+                    logging.info("Connexion continue au flux haute résolution (tampon de pré-déclenchement)…")
                     capture = cv2.VideoCapture(
                         stream_url, cv2.CAP_FFMPEG,
                         [cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000,
@@ -617,7 +830,9 @@ class Surveillance:
                         reconnect_delay = min(reconnect_delay * 2, 30.0)
                         continue
                     reconnect_delay = 1.0
-                    logging.info("Flux haute résolution connecté")
+                    source_fps = capture.get(cv2.CAP_PROP_FPS)
+                    capture_fps = float(source_fps) if math.isfinite(source_fps) and source_fps > 0 else 10.0
+                    logging.info("Flux haute résolution connecté; pré-déclenchement actif")
                 ok, frame = capture.read()
                 frame_read_at = time.monotonic()
                 position_msec = capture.get(cv2.CAP_PROP_POS_MSEC) if ok else float("nan")
@@ -629,65 +844,84 @@ class Surveillance:
                 if not ok or frame is None:
                     logging.warning("Flux haute résolution interrompu; reconnexion automatique")
                     close_writer()
-                    close_capture()
+                    close_capture(clear_buffer=True)
                     self.stop_event.wait(1.0)
                     continue
+
+                height, width = frame.shape[:2]
+                frame_size = (width, height)
+                if buffer_size is not None and frame_size != buffer_size:
+                    if writer is not None:
+                        close_writer()
+                        logging.warning("Résolution haute du flux modifiée; clip fermé")
+                    clear_pre_roll()
+                buffer_size = frame_size
+                if timestamp_mode is None:
+                    timestamp_mode = "pts" if stream_position is not None else "estimated"
+                if timestamp_mode == "pts":
+                    if stream_position is not None and (
+                            last_timeline_timestamp is None
+                            or stream_position > last_timeline_timestamp):
+                        timestamp = stream_position
+                    else:
+                        # CAP_PROP_POS_MSEC can be missing or stuck on live RTSP inputs.
+                        # Restart the ring on a synthetic frame-rate timeline rather than
+                        # mixing incomparable timestamps or draining it faster than real time.
+                        writer_elapsed = None
+                        if (writer is not None and writer_started_at is not None
+                                and writer_start_timeline is not None):
+                            pts_elapsed = (
+                                0.0 if last_timeline_timestamp is None
+                                else max(0.0, last_timeline_timestamp - writer_start_timeline)
+                            )
+                            wall_elapsed = max(0.0, frame_read_at - writer_started_at)
+                            writer_elapsed = max(pts_elapsed, wall_elapsed)
+                        clear_pre_roll()
+                        buffer_size = frame_size
+                        timestamp_mode = "estimated"
+                        timestamp = frame_read_at
+                        if writer_elapsed is not None:
+                            writer_start_timeline = timestamp - writer_elapsed
+                elif last_timeline_timestamp is None:
+                    timestamp = frame_read_at
+                else:
+                    timestamp = last_timeline_timestamp + 1.0 / capture_fps
+                last_timeline_timestamp = timestamp
+
+                encoded_ok, encoded = cv2.imencode(
+                    ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90]
+                )
+                if encoded_ok:
+                    pre_roll.append(_BufferedFrame(timestamp, encoded.tobytes()))
+                    cutoff = timestamp - PRE_ROLL_SECONDS
+                    max_pre_roll_frames = max(
+                        2, math.ceil(PRE_ROLL_SECONDS * capture_fps * 2) + 1
+                    )
+                    while pre_roll and (
+                            pre_roll[0].timestamp < cutoff
+                            or len(pre_roll) > max_pre_roll_frames):
+                        pre_roll.popleft()
+                else:
+                    logging.warning("Impossible d'encoder une image du tampon de pré-déclenchement")
+
                 with self.lock:
                     should_record = self._should_record_unlocked()
                 if not should_record:
                     close_writer()
-                    close_capture()
                     continue
-                height, width = frame.shape[:2]
                 if writer is None:
-                    self.output_dir.mkdir(parents=True, exist_ok=True)
-                    filename = self.output_dir / f"{datetime.now():%Y%m%d_%H%M%S_%f}.mp4"
-                    fps = capture.get(cv2.CAP_PROP_FPS)
-                    writer_fps = float(fps) if math.isfinite(fps) and fps > 0 else 10.0
-                    writer_path = filename.with_name(f".{filename.stem}.recording.mp4")
-                    published_path = filename
-                    with self.lock:
-                        evidence_frame = (None if self.recording_evidence_frame is None
-                                          else self.recording_evidence_frame.copy())
-                        evidence_labels = self.recording_evidence_labels.copy()
-                    writer = cv2.VideoWriter(str(writer_path), cv2.VideoWriter_fourcc(*"mp4v"),
-                                             writer_fps, (width, height))
-                    if not writer.isOpened():
-                        logging.error("Impossible de créer le MP4 haute résolution (%dx%d)", width, height)
-                        close_writer()
-                        continue
-                    writer_started_at = time.monotonic()
-                    writer_start_stream_position = stream_position
-                    last_size = (width, height)
-                    with self.lock:
-                        self.recording_active = True
-                    logging.info("[ALERTE] Début de l'enregistrement haute résolution: %s", filename)
-                elif (width, height) != last_size:
+                    start_writer(frame, timestamp, frame_read_at)
+                elif frame_size != writer_size:
                     close_writer()
                     logging.warning("Résolution haute du flux modifiée; clip fermé")
-                    continue
-                wall_elapsed = max(0.0, frame_read_at - writer_started_at)
-                # OpenCV can drain buffered RTSP frames faster than real time; trust
-                # their media position when available, and use monotonic time as fallback.
-                stream_elapsed = (
-                    max(0.0, stream_position - writer_start_stream_position)
-                    if stream_position is not None and writer_start_stream_position is not None
-                    else 0.0
-                )
-                elapsed = max(wall_elapsed, stream_elapsed)
-                target_frames = max(
-                    writer_frames, self._frame_target_for_elapsed(elapsed, writer_fps)
-                )
-                frames_to_write = max(0, target_frames - writer_frames)
-                for _ in range(max(0, frames_to_write - 1)):
-                    writer.write(last_writer_frame if last_writer_frame is not None else frame)
-                if frames_to_write:
-                    writer.write(frame)
-                    writer_frames += frames_to_write
-                    last_writer_frame = frame
+                else:
+                    write_scheduled_frame(
+                        frame, timestamp, frame_read_at,
+                        timestamp_mode in {"pts", "estimated"},
+                    )
         finally:
             close_writer()
-            close_capture()
+            close_capture(clear_buffer=True)
 
     def inference_loop(self) -> None:
         while not self.stop_event.is_set():
@@ -707,14 +941,21 @@ class Surveillance:
                     if ok:
                         self.latest_jpeg = jpeg.tobytes()
                         self.preview_sequence += 1
+                    motion_detections = self.motion_tracker.update(
+                        detections, now, max(1.0, interval * 3)
+                    )
                     was_recording = self.record_requested
-                    if detections and self.recording_enabled:
+                    if motion_detections and self.recording_enabled:
                         if not was_recording and not self.recording_active:
-                            self.recording_evidence_frame = self._annotate_detection_frame(frame, detections)
+                            self.recording_evidence_frame = self._annotate_detection_frame(
+                                frame, motion_detections
+                            )
                             self.recording_evidence_labels = {}
                         elif self.recording_evidence_frame is None:
-                            self.recording_evidence_frame = self._annotate_detection_frame(frame, detections)
-                        for detection in detections:
+                            self.recording_evidence_frame = self._annotate_detection_frame(
+                                frame, motion_detections
+                            )
+                        for detection in motion_detections:
                             previous_confidence = self.recording_evidence_labels.get(detection.label, 0.0)
                             self.recording_evidence_labels[detection.label] = max(
                                 previous_confidence, detection.confidence
@@ -726,9 +967,13 @@ class Surveillance:
                           and now - self.last_detection >= self.no_detection_seconds):
                         self.record_requested = False
                 for detection in detections:
-                    logging.info("[ALERTE] %s détecté (%.0f%%)", detection.label, detection.confidence * 100)
-                if detections and self.recording_enabled and not was_recording:
-                    logging.info("Alarme déclenchée; démarrage de l'enregistrement")
+                    logging.debug("Objet détecté : %s (%.0f%%)",
+                                  detection.label, detection.confidence * 100)
+                for detection in motion_detections:
+                    logging.info("[MOUVEMENT] %s (%.0f%%)",
+                                 detection.label, detection.confidence * 100)
+                if motion_detections and self.recording_enabled and not was_recording:
+                    logging.info("Mouvement détecté; enregistrement demandé")
             except Exception:
                 logging.exception("Erreur pendant l'inférence TFLite")
             self.stop_event.wait(interval)
