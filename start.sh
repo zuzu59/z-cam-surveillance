@@ -11,9 +11,46 @@ if [[ ! -x "$PYTHON" ]]; then
   exit 1
 fi
 
-# Information-only options must not stop a running server.
-if [[ "${1:-}" == "--help" || "${1:-}" == "--version" ]]; then
-  exec "$PYTHON" surveillance.py "$@"
+MODE="foreground"
+case "${1:-}" in
+  background)
+    MODE="background"
+    shift
+    ;;
+  stop)
+    MODE="stop"
+    shift
+    if (($# > 0)); then
+      echo "Usage : ./start.sh stop" >&2
+      exit 2
+    fi
+    ;;
+  -h|--help)
+    # Information-only options must not stop a running server.
+    cat <<'HELP'
+Usage :
+  ./start.sh [options]           Démarre au premier plan
+  ./start.sh background [options] Démarre en arrière-plan
+  ./start.sh stop                Arrête l’application
+
+Options de l’application :
+HELP
+    exec "$PYTHON" surveillance.py "$@"
+    ;;
+  --version)
+    # Information-only options must not stop a running server.
+    exec "$PYTHON" surveillance.py "$@"
+    ;;
+esac
+
+if [[ "$MODE" == "background" ]]; then
+  umask 077
+  RUNTIME_DIR="$ROOT_DIR/.runtime"
+  LOG_FILE="$RUNTIME_DIR/surveillance.log"
+  mkdir -p -- "$RUNTIME_DIR"
+  chmod 700 "$RUNTIME_DIR"
+  touch "$LOG_FILE"
+  chmod 600 "$LOG_FILE"
 fi
 
 mapfile -t running_pids < <("$PYTHON" - "$ROOT_DIR" <<'PY'
@@ -52,8 +89,10 @@ for entry in glob.glob("/proc/[0-9]*/cmdline"):
 PY
 )
 
+found_pids=0
 for pid in "${running_pids[@]}"; do
   [[ -n "$pid" ]] || continue
+  found_pids=1
   echo "Arrêt de l’application existante (PID $pid)…"
   kill -TERM "$pid" 2>/dev/null || continue
   for _ in $(seq 1 150); do
@@ -67,6 +106,32 @@ for pid in "${running_pids[@]}"; do
     kill -KILL "$pid" 2>/dev/null || true
   fi
 done
+
+if [[ "$MODE" == "stop" ]]; then
+  if ((found_pids == 0)); then
+    echo "Aucune instance de l’application n’est en cours."
+  else
+    echo "Application arrêtée."
+  fi
+  exit 0
+fi
+
+if [[ "$MODE" == "background" ]]; then
+  echo "Démarrage de l’application web en arrière-plan…"
+  nohup "$PYTHON" surveillance.py --config "$CONFIG" "$@" >> "$LOG_FILE" 2>&1 < /dev/null &
+  server_pid=$!
+  for _ in $(seq 1 10); do
+    process_state="$(ps -o stat= -p "$server_pid" 2>/dev/null | tr -d '[:space:]' || true)"
+    if [[ -z "$process_state" || "$process_state" == Z* ]]; then
+      echo "Le serveur s’est arrêté au démarrage; consultez les journaux dans $LOG_FILE." >&2
+      exit 1
+    fi
+    sleep 0.1
+  done
+  echo "Application démarrée en arrière-plan (PID $server_pid)."
+  echo "Journaux : $LOG_FILE"
+  exit 0
+fi
 
 echo "Démarrage de l’application web…"
 exec "$PYTHON" surveillance.py --config "$CONFIG" "$@"

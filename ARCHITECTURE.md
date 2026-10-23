@@ -45,22 +45,26 @@ de capture et d’analyse ne bloquent pas les routes Flask.
 
 ## 3. Démarrage et cycle de vie
 
-### Démarrage normal
+### Démarrage et arrêt
 
-`./start.sh` est le point d’entrée prévu :
+`./start.sh` est le point d’entrée prévu. Sans sous-commande, il démarre
+`surveillance.py` au premier plan. `./start.sh background` démarre le même
+serveur en arrière-plan et redirige ses sorties vers
+`.runtime/surveillance.log` (répertoire en mode `0700`, journal en `0600`).
+`./start.sh stop` arrête l’instance du projet, qu’elle ait été lancée au
+premier plan ou en arrière-plan. Les options d’information `--help` et
+`--version` n’interrompent pas une instance en cours.
 
-1. Le script traite les options d’information comme `--help` et `--version`.
-2. Il recherche dans `/proc` une instance utilisant ce projet et ce fichier de
-   configuration.
-3. S’il en trouve une, il lui envoie `SIGTERM`, attend jusqu’à 30 secondes,
-   puis emploie `SIGKILL` si nécessaire.
-4. Il démarre `surveillance.py` avec l’interpréteur de `.venv` et le JSON
-   local.
+Pour les démarrages, le script recherche dans `/proc` une instance utilisant
+ce projet et ce fichier de configuration. S’il en trouve une, il lui envoie
+`SIGTERM`, attend jusqu’à 30 secondes, puis emploie `SIGKILL` si nécessaire.
+Il lance ensuite `surveillance.py` avec l’interpréteur de `.venv` et le JSON
+local; la sous-commande `background` détache le processus du terminal.
 
-Un enregistrement depuis Configuration suit aussi ce cycle : le JSON est
-validé et écrit, puis `start.sh` est lancé après un court délai.
-La nouvelle instance expose un identifiant différent, que le navigateur
-attend avant de recharger la page.
+Un enregistrement depuis Configuration suit aussi le cycle d’arrêt puis de
+redémarrage : le JSON est validé et écrit, puis `start.sh` est lancé après un
+court délai. La nouvelle instance expose un identifiant différent, que le
+navigateur attend avant de recharger la page.
 
 ### Initialisation du moteur
 

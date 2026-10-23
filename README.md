@@ -45,10 +45,12 @@ Dépendances : LiteRT (`ai-edge-litert`), NumPy, Flask et `opencv-python-headles
 ## Lancement
 
 ```bash
-./start.sh
+./start.sh             # démarrage au premier plan
+./start.sh background  # démarrage en arrière-plan
+./start.sh stop        # arrêt
 ```
 
-`./start.sh` est l’unique commande de démarrage/redémarrage : elle recherche le processus qui utilise le fichier de configuration de ce dépôt, l’arrête proprement si nécessaire, puis lance l’application. Utilisez-la aussi après une modification manuelle du JSON. Dans un terminal interactif, `Ctrl+C` arrête le serveur. La version peut être affichée avec `./start.sh --version` sans interrompre une instance en cours.
+`./start.sh` démarre l’application au premier plan; si une instance de ce dépôt tourne déjà, elle est arrêtée proprement avant le démarrage. `./start.sh background` fait de même puis détache le serveur du terminal. Ses journaux sont écrits dans `.runtime/surveillance.log`. `./start.sh stop` arrête proprement une instance, qu’elle ait été lancée au premier plan ou en arrière-plan. Dans un terminal interactif, `Ctrl+C` arrête aussi le serveur au premier plan. Utilisez la commande de démarrage après une modification manuelle du JSON. La version peut être affichée avec `./start.sh --version` sans interrompre une instance en cours.
 
 Par défaut, le serveur écoute sur `0.0.0.0:8091`. Ouvrez `http://<adresse-du-serveur>:8091/`. L’application n’a pas d’authentification : gardez-la sur un réseau de confiance, restreignez l’accès par pare-feu et ne l’exposez pas directement à Internet.
 
